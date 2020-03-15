@@ -34,7 +34,7 @@ def to_sent(vocab, ids):
 def get_interactive_batch(args, vid, question, iters):
     batch = []
     for key, it in iters.items():
-        for ex in it.it.dataset.examples:
+        for ex in it.dataset.examples:
             if ex.vid == vid:
                 batch.append((key, ex))
     tokenizer = get_tokenizer(args)

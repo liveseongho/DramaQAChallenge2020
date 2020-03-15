@@ -169,7 +169,7 @@ class MultiChoice(nn.Module):
         qa_character = [torch.matmul(concat_qa_none[i], self.character) for i in range(5)]
         qa_character = [self.norm1(qa_character[i]) for i in range(5)]
 
-        A = features['adjacency']
+        # A = features['adjacency']
         #A_ = self.gcn(self.character, range(21), A)
 
         if self.script_on:

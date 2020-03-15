@@ -7,8 +7,8 @@ config = {
     'batch_sizes':  (16, 24, 12),
     'lower': True,
     #'use_inputs': ['images', 'subtitle', 'speaker', 'que_len', 'ans_len', 'sub_len', 'sub_sentence_len', 'visual'],  # We advise not to use description for the challenge
-    'use_inputs':['que','answers','subtitle','speaker','images','sample_visual','filtered_visual','filtered_sub','filtered_speaker','filtered_image','que_len','ans_len','sub_len','filtered_visual_len','filtered_sub_len','filtered_image_len','adjacency', 'filtered_person_full', 'filtered_person_full_len', 'q_level_logic'],
-    'stream_type': ['script', 'visual_bb'], #
+    'use_inputs':['que','answers','subtitle','speaker','images','sample_visual','filtered_visual','filtered_sub','filtered_speaker','filtered_image','que_len','ans_len','sub_len','filtered_visual_len','filtered_sub_len','filtered_image_len', 'filtered_person_full', 'filtered_person_full_len', 'q_level_logic'],
+    'stream_type': ['script', 'visual_bb', 'visual_meta'], #
     'cache_image_vectors': True,
     'image_path': 'data/AnotherMissOh/AnotherMissOh_images',
     'visual_path': 'data/AnotherMissOh/AnotherMissOh_Visual.json',
@@ -19,7 +19,7 @@ config = {
     'video_type': ['shot', 'scene'],
     'feature_pooling_method': 'mean',
     'max_epochs': 20,
-    'allow_empty_images': False,
+    # 'allow_empty_images': False,
     'num_workers': 40,
     'image_dim': 512,  # hardcoded for ResNet50
     'n_dim': 300,

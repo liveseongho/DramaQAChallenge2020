@@ -61,7 +61,7 @@ def get_model_ckpt(args):
     else:
         iters, vocab = get_iterator(args, vocab)
     model = get_model(args, vocab)
-    model.load_embedding(pickle.load(open(args.vocab_path, "rb" ) ))
+    model.load_embedding(vocab)
 
     if ckpt_available:
         model.load_state_dict(dt['model'])

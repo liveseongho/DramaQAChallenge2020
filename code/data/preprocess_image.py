@@ -1,8 +1,7 @@
 import math
 import os
 from collections import defaultdict
-from multiprocessing import Pool
-import pickle
+# from multiprocessing import Pool
 
 from PIL import Image
 from tqdm import tqdm
@@ -10,13 +9,11 @@ from tqdm import tqdm
 import torch
 from torch import nn, utils
 from torchvision import models, datasets, transforms
-from utils import get_episode_id, get_frame_id
+from utils import *
 
 from .vision import VisionDataset
 
 from pprint import pprint
-
-import json
 
 image_size = [224, 224]
 delimiter = '/'
@@ -42,13 +39,11 @@ def preprocess_images(args, image_path, cache=True, to_features=True, device=-1,
 
     if cache_exists:
         print("Loading Image Cache")
-        with open(str(cache_path.resolve()), 'rb') as f:
-            image_vectors = pickle.load(f)
+        image_vectors = load_pickle(cache_path)
 
     if region_cache_exists:
         print("Loading Person Region Cache")
-        with open(str(cache_by_region_path.resolve()), 'rb') as f:
-            region_vectors_by_episode = pickle.load(f)
+        region_vectors_by_episode = load_pickle(cache_by_region_path)
     
     if not cache_exists or not region_cache_exists:
         print("Loading Image Files and Building Image / Person Region Cache")
@@ -65,7 +60,6 @@ def preprocess_images(args, image_path, cache=True, to_features=True, device=-1,
         model = get_model(device)
 
         episode_paths = list(image_path.glob('*'))
-        # list((print(path) for path in episode_paths))
         for e in tqdm(episode_paths, desc='Episode'):
             shot_paths = list(e.glob('*/*'))  # episode/scene/shot
 
@@ -105,26 +99,22 @@ def preprocess_images(args, image_path, cache=True, to_features=True, device=-1,
         if cache:
             if not cache_exists:
                 print("Saving Image Cache")
-                with open(str(cache_path), 'wb') as f:
-                    pickle.dump(image_vectors, f)
+                save_pickle(image_vectors, cache_path)
 
             if not region_cache_exists:
                 print("Saving Image Region Cache")
-                with open(str(cache_by_region_path), 'wb') as f:
-                    pickle.dump(region_vectors_by_episode, f)
+                save_pickle(region_vectors_by_episode, cache_by_region_path)
 
     if cache_by_episode_path.is_file():
         print("Loading Image Cache by Episode")
-        with open(str(cache_by_episode_path.resolve()), 'rb') as f:
-            image_vectors_by_episode = pickle.load(f)
+        image_vectors_by_episode = load_pickle(cache_by_episode_path)
     else:
         print('Merging Features by Episode')
         image_vectors_by_episode = merge_episode_features(image_vectors)
 
         if cache:
             print("Saving Image by Episode Cache")
-            with open(str(cache_by_episode_path), 'wb') as f:
-                pickle.dump(image_vectors_by_episode, f)
+            save_pickle(image_vectors_by_episode, cache_by_episode_path)
 
     return image_vectors, image_vectors_by_episode, region_vectors_by_episode, visuals
 
@@ -146,12 +136,6 @@ def load_images(shot_paths, num_workers=1):
     """
 
     images = list(tqdm(map(load_image, shot_paths), total=len(shot_paths), desc='loading images'))
-   
-    # if num_workers < 2:
-    #     images = list(tqdm(map(load_image, shot_paths), total=len(shot_paths), desc='loading images'))
-    # else:
-    #     with Pool(num_workers) as p:
-    #         images = list(tqdm(p.imap(load_image, shot_paths), total=len(shot_paths), desc='loading images'))
     images = {k: v for k, v in images}
 
     return images
@@ -190,9 +174,7 @@ def load_image(shot_path):
 
 
 def load_visual(args):
-    with open(args.visual_path, "r", encoding='utf-8') as f:
-        visual = json.load(f)
-
+    visual = load_json(args.visual_path)
     visual_by_episode = dict_for_each_episode()
 
     for shot, frames in visual.items():
@@ -337,7 +319,7 @@ def extract_features(args, dataset, model, device=-1, num_workers=1, extractor_b
     model.eval()
     pooling = get_pooling(args)
     images = {}
-    # print("Extracting Features")
+
     with torch.no_grad():
         for i, data in tqdm(enumerate(dataloader), total=math.ceil(len(dataset) / extractor_batch_size), desc='extracting features'):
             keys, tensor, _, _ = data
@@ -353,21 +335,6 @@ def extract_features(args, dataset, model, device=-1, num_workers=1, extractor_b
 
     image_vectors = {}
     
-    '''
-    if fixed_vector:
-        for vid, dt in images.items():
-            feature = list([v.to(device) for v in dt.values()])
-            feature = torch.stack(feature, dim=0)
-
-
-
-            feature = pooling(feature, -1)
-            feature = pooling(feature, -1)  # pooling image size
-            feature = pooling(feature, 0)  # pooling all images in shot (or scene)
-
-            image_vectors[vid] = feature.cpu().numpy()
-    else:
-    '''
     for vid, dt in images.items():
         feature = []
         frame_ids = []
