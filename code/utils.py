@@ -29,7 +29,6 @@ def save_pickle(data, path):
     with open(path, "wb") as f:
         pickle.dump(data, f)
 
-
 def get_dirname_from_args(args):
     dirname = ''
     for key in sorted(log_keys):
@@ -46,8 +45,6 @@ def get_now():
     return now.strftime('%Y-%m-%d-%H-%M-%S')
 
 
-# def make_jsonl(path):
-#     if not path.is_file() and path.suffix == '.jsonl':
 def make_jsonl(path, overwrite=False):
     if (overwrite or not path.is_file()) and path.suffix == '.jsonl':
         path_json = path.parent / path.name[:-1]

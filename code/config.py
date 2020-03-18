@@ -1,9 +1,9 @@
 config = {
-    'multichoice': True,
-    'extractor_batch_size': 384,
-    'model_name': 'multi_choice',
+    # 'multichoice': True, # useless
+    'extractor_batch_size': 32, 
+    'model_name': 'multi_choice', 
     'log_path': 'data/log',
-    'tokenizer': 'nonword',  # 'nltk' 
+    'tokenizer': 'nonword', # 'nltk' # need to check
     'batch_sizes':  (16, 24, 12),
     'lower': True,
     #'use_inputs': ['images', 'subtitle', 'speaker', 'que_len', 'ans_len', 'sub_len', 'sub_sentence_len', 'visual'],  # We advise not to use description for the challenge
@@ -16,12 +16,12 @@ config = {
     'subtitle_path': 'data/AnotherMissOh/AnotherMissOh_script.json',
     'glove_path': "data/glove.6B.300d.txt", # "data/glove.6B.50d.txt"
     'vocab_path': "data/vocab.pickle",
-    'video_type': ['shot', 'scene'],
-    'feature_pooling_method': 'mean',
+    # 'video_type': ['shot', 'scene'], # useless
+    # 'feature_pooling_method': 'mean', # useless
     'max_epochs': 20,
-    # 'allow_empty_images': False,
+    # 'allow_empty_images': False, # useless
     'num_workers': 40,
-    'image_dim': 512,  # hardcoded for ResNet50
+    'image_dim': 512,  # hardcoded for ResNet18
     'n_dim': 300,
     'layers': 3,
     'dropout': 0.5,
@@ -34,9 +34,9 @@ config = {
     'log_cmd': False,
     'ckpt_path': 'data/ckpt',
     'ckpt_name': None,
-    'text_feature_names': ['subtitle', 'description'],
+    # 'text_feature_names': ['subtitle', 'description'], # useless
     'max_sentence_len': 30,
-    'mask': False,
+    # 'mask': False, # useless
     'max_sub_len': 300,
     'max_image_len': 100,
     'shuffle': (False, False, False),
@@ -49,5 +49,5 @@ debug_options = {
 
 log_keys = [
     'model_name',
-    'feature_pooling_method',
+    # 'feature_pooling_method', # useless
 ]

@@ -5,7 +5,7 @@ from torchtext.data.batch import Batch
 
 from ckpt import get_model_ckpt
 from utils import prepare_batch
-from data.dataset import get_tokenizer
+from data.dataset_multichoice import get_tokenizer
 
 
 def interactive(args):

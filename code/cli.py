@@ -8,13 +8,12 @@ import torch
 import numpy as np
 
 from config import config, debug_options
-from data.dataset import get_iterator
+from data.dataset_multichoice import get_iterator
 from utils import wait_for_key, suppress_stdout
 from train import train
 from evaluate import evaluate
 from interactive import interactive
 from infer import infer
-
 
 class Cli:
     def __init__(self):
@@ -89,8 +88,8 @@ def fix_seed(args):
 
 
 def get_device(args):
-    if hasattr(args, 'device'):
-        device = args.device
+    if 'device' in args:
+        device = args['device']
     else:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     return {'device': device}

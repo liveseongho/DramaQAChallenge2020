@@ -1,4 +1,3 @@
-# from functools import partial
 from collections import defaultdict
 
 import torch
@@ -39,70 +38,78 @@ n_speakers = len(speaker_name)
 int_dtype = torch.long
 float_dtype = torch.float
 
-def get_data_path(args, mode='train', ext='.json'):
-    name = args.data_path.name.split('_')
-    name.insert(1, mode)
-    name = '_'.join(name)
-    path = args.data_path.parent / name
-    path = path.parent / (path.stem + ext)
+# Refer to https://docs.scipy.org/doc/numpy/user/basics.subclassing.html
+# for information about subclassing np.ndarray
+# 
+# Refer to https://stackoverflow.com/questions/26598109/preserve-custom-attributes-when-pickling-subclass-of-numpy-array
+# for information about pickling custom attributes of subclasses of np.ndarray
+class Vocab(np.ndarray):
+    def __new__(cls, input_array, idx2word, word2idx, special_tokens):
+        obj = np.asarray(input_array).view(cls)
+        
+        obj.itos = idx2word
+        obj.stoi = word2idx
+        obj.specials = special_tokens
+        obj.special_ids = [word2idx[token] for token in special_tokens]
+        for token in special_tokens:
+            setattr(obj, token[1:-1], token) # vocab.sos = '<sos>' ... 
 
-    return path
+        return obj
 
-def get_vocab_attr_path(path, attr):
-    return path.parent / (path.stem + '_' + attr + path.suffix)
+    def __array_finalize__(self, obj):
+        if obj is None: 
+            return
 
-def save_vocab(vocab, path):
-    save_pickle(vocab, path)
-    save_pickle(vocab.idx2word, get_vocab_attr_path(path, 'idx2word'))
-    save_pickle(vocab.word2idx, get_vocab_attr_path(path, 'word2idx'))
-    save_pickle(vocab.specials, get_vocab_attr_path(path, 'specials'))
+        self.itos = getattr(obj, 'itos', None)
+        self.stoi = getattr(obj, 'stoi', None)
+        self.specials = getattr(obj, 'specials', None)
+        self.special_ids = getattr(obj, 'special_ids', None)
+        if self.special_ids is not None:
+            for token in obj.specials:
+                attr = token[1:-1]
+                setattr(self, attr, getattr(obj, attr, None))
+        
+    def __reduce__(self):
+        pickled_state = super(Vocab, self).__reduce__()
+        new_state = pickled_state[2] + (self.__dict__,)
 
-def load_vocab(path):
-    if not os.path.isfile(path):
-        print('There is no cached vocab.')
+        return (pickled_state[0], pickled_state[1], new_state)
 
-        return None
+    def __setstate__(self, state):
+        self.__dict__.update(state[-1])
 
-    print('Using cached vocab.')
-    vocab = load_pickle(path)
-    idx2word, word2idx, specials = load_vocab_attr(path)
-    set_vocab_attr(vocab, idx2word, word2idx, specials)
+        super(Vocab, self).__setstate__(state[0:-1])
 
-    return vocab
+    def get_word(self, idx):
+        return self.itos[idx]
 
-def load_vocab_attr(path):
-    idx2word = load_pickle(get_vocab_attr_path(path, 'idx2word'))
-    word2idx = load_pickle(get_vocab_attr_path(path, 'word2idx'))
-    specials = load_pickle(get_vocab_attr_path(path, 'specials'))
-
-    return idx2word, word2idx, specials
-
+    def get_index(self, word):
+        return self.stoi.get(word, self.stoi[unk_token])
 
 class ImageData:
     def __init__(self, args, vocab):
         self.args = args
-        self.image_dim = args.image_dim
-
-        self.num_workers = args.num_workers
-        self.device = args.device
-        self.image_dt, self.region_dt, self.visuals = self.load_images(
-            args.image_path,
-            cache=args.cache_image_vectors, 
-            device=args.device
-        )
 
         self.vocab = vocab
         self.pad_index = vocab.get_index(pad_token)
         self.none_index = speaker_index['None']
         self.visual_pad = [self.none_index, self.pad_index, self.pad_index] 
-        self.attach_visual()
+
+        self.image_dim = args.image_dim
+        self.image_dt = self.load_images(
+            args.image_path,
+            cache=args.cache_image_vectors, 
+            device=args.device,
+            num_workers=args.num_workers
+        )
 
         self.structure = self.build_structure()
 
-    def load_images(self, image_path, cache=True, device=-1):
-        _, images_by_episode, regions_by_episode, visuals = preprocess_images(self.args, image_path, cache=cache, device=device, num_workers=self.num_workers)
+    def load_images(self, image_path, cache=True, device=-1, num_workers=40):
+        full_images, person_fulls, visuals = preprocess_images(self.args, image_path, cache=cache, device=device, num_workers=num_workers)
+        image_dt = self.attach_visual(full_images, person_fulls, visuals)
 
-        return images_by_episode, regions_by_episode, visuals
+        return image_dt
 
     def build_structure(self):
         image_path = self.args.image_path
@@ -130,26 +137,18 @@ class ImageData:
 
         return episodes
 
-    def attach_visual(self):
+    def attach_visual(self, full_images, person_fulls, visuals):
         """
         After: 
 
-        self.image_dt = [
+        full_images = [
             {}, # empty dict
 
             { (episode1)
                 frame_id1: {
-                    vector: vector1, 
-                    persons: [
-                        [person1_id_idx, behavior1_idx, emotion1_idx], # torch.Tensor
-                        [person2_id_idx, behavior2_idx, emotion2_idx], # torch.Tensor
-                        ...
-                    ],
-                    person_full: [
-                        vector1, 
-                        vector2,
-                        ...
-                    ]
+                    full_image:   full_image (tensor of shape (512,)),
+                    persons:      [[person1_id_idx, behavior1_idx, emotion1_idx], ...],
+                    person_fulls: [person_full1 (tensor of shape (512,)), ... ] 
                 },
                 ...
             },
@@ -162,21 +161,21 @@ class ImageData:
         ]
         """
 
-        for frames in self.image_dt:
+        for frames in full_images:
             for key, value in frames.items():
                 frames[key] = {
-                    'vector': value,
+                    'full_image': value,
                     'persons': [],
-                    'person_full': []
+                    'person_fulls': []
                 }
 
         for e in range(1, 18 + 1):
-            master_dict = self.image_dt[e]
-            region_dict = self.region_dt[e]
-            visual_dict = self.visuals[e]
+            master_dict = full_images[e]
+            pfu_dict = person_fulls[e]
+            visual_dict = visuals[e]
 
             for frame, info in master_dict.items():
-                if frame not in visual_dict:
+                if frame not in visual_dict: # no visual for this frame
                     continue
 
                 visual = visual_dict[frame]
@@ -196,15 +195,16 @@ class ImageData:
                     processed = [person_id_idx, behavior_idx, emotion_idx] # Don't convert visual to a tensor yet
                     processed_persons.append(processed)
 
-                # when processed_persons is empty, region_dict[frame]['image'] contains 
-                # features of all image. Just ignore this
+                # when processed_persons is empty, pfu_dict[frame] contains 
+                # full_image feature. Just ignore this.
                 if processed_persons: # not empty
-                    master_dict[frame]['person_full'] = region_dict[frame]['image']
+                    master_dict[frame]['person_fulls'] = list(pfu_dict[frame]) # (N, C) np.array -> list of N arrays of shape (C,)
+
+        return full_images
 
     def get_image_by_vid(self, episode, scene, shot_contained):
         first_shot = shot_contained[0]
         last_shot = shot_contained[-1]
-
         first_frame = self.structure[episode][scene][first_shot][0]
         last_frame = self.structure[episode][scene][last_shot][-1]
 
@@ -215,31 +215,30 @@ class ImageData:
 
     def get_image_by_frame(self, episode, start_frame_id, end_frame_id):
         frames_in_episode = self.image_dt[episode]
-        regions_in_episode = self.region_dt[episode]
 
-        cnt = mean_feature = 0
-        all_feature = []
-        sample_vis = [] # becomes the first sample_vis data in the range
-        all_vis = []
-        all_p_full = []
+        cnt = 0       # number of frames
+        mean_fi = 0   # mean of full_image features 
+        all_fi = []   # list of full_image features  (aligned with person)
+        all_pfu = []  # list of person_full features (aligned with person)
+        all_v = []    # list of visuals              (aligned with person)
+        sample_v = [] # first visual in the range
 
         cur_id = start_frame_id
         added_8 = False
-
         while cur_id < end_frame_id:
             if cur_id in frames_in_episode: # found a frame in a certain shot
                 frame = frames_in_episode[cur_id]
 
                 p = frame['persons']
-                sample_vis = p if sample_vis == [] else sample_vis
-                all_vis.extend(p) # include all visual info of a frame
+                sample_v = p if sample_v == [] else sample_v
+                all_v.extend(p) # include all visual info of a frame
 
-                f = frame['vector']
-                mean_feature += f
-                all_feature.extend(f for i in range(len(p)))
+                fi = frame['full_image']
+                mean_fi += fi
+                all_fi.extend(fi for i in range(len(p)))
 
-                pf = frame['person_full']
-                all_p_full.extend(pf)
+                pfu = frame['person_fulls']
+                all_pfu.extend(pfu)
 
                 cnt += 1
 
@@ -255,45 +254,38 @@ class ImageData:
                 cur_id += 1
                 added_8 = False
 
-        if cnt == 0: # start_id = end_id = -25 (no subtitle)
-            mean_feature = np.zeros(self.image_dim)
+        if cnt == 0:
+            mean_fi = np.zeros(self.image_dim)
         else:
-            mean_feature /= cnt
+            mean_fi /= cnt
 
-        if not all_feature:
-            all_feature.append(np.zeros(self.image_dim))
+        if not all_fi: # empty
+            all_fi.append(np.zeros(self.image_dim))
 
-        if not sample_vis: # empty
-            sample_vis = self.visual_pad
+        if not sample_v: # empty
+            sample_v = self.visual_pad
         else:
-            sample_vis = sample_vis[0] # just select the first one
+            sample_v = sample_v[0] # just select the first one
 
-        if not all_vis: # empty
-            all_vis = [self.visual_pad]
+        if not all_v: # empty: all_v and all_v are empty at the same time
+            all_v = [self.visual_pad]
+            all_pfu.append(np.zeros(self.image_dim))
 
-        if not all_p_full: # empty at the same time as all_vis
-            all_p_full.append(np.zeros(self.image_dim))
-
-        # Don't convert visual to a tensor yet
-        return mean_feature, all_feature, sample_vis, all_vis, all_p_full
+        # Don't convert visual to tensors yet
+        return mean_fi, all_fi, sample_v, all_v, all_pfu
 
 
 class TextData:
     def __init__(self, args, vocab=None):
         self.args = args
 
-        self.line_keys = ['que']  # 'description'
+        self.line_keys = ['que']
         self.list_keys = ['answers']
         self.contained_subs_keys = ['speaker', 'utter']
 
         self.glove_path = args.glove_path
         self.json_data_path = {m: get_data_path(args, mode=m, ext='.json') for m in modes}
-        #self.pickle_data_path = {m: get_data_path(args, mode=m, ext='.pickle') for m in modes}
-        self.pickle_data_path = {
-            'train': get_data_path(args, mode='train', ext='.pickle'),
-            'val': get_data_path(args, mode='val', ext='.pickle'),
-            'test': get_data_path(args, mode='test', ext='.pickle'),
-        }
+        self.pickle_data_path = {m: get_data_path(args, mode=m, ext='.pickle') for m in modes}
         self.vocab_path = args.vocab_path
 
         self.tokenizer = get_tokenizer(args)
@@ -302,17 +294,20 @@ class TextData:
         self.special_tokens = [sos_token, eos_token, pad_token, unk_token]
 
         if vocab is None:
-            vocab = load_vocab(args.vocab_path) # Use cached vocab if it exists.
+            if os.path.isfile(self.vocab_path): # Use cached vocab if it exists.
+                print('Using cached vocab.')
+                vocab = load_pickle(self.vocab_path) 
+            else: # There is no cached vocab. Build vocabulary and preprocess text data
+                print('There is no cached vocab.')
+                vocab = self.build_word_vocabulary()
+                self.preprocess_text(vocab)
 
-        if vocab is None: # There is no cached vocab. Build vocabulary
-            self.vocab, self.data = self.build_word_vocabulary()
-        else:
-            self.vocab = vocab
-            self.data = {m: load_pickle(self.pickle_data_path[m]) for m in modes} 
+        self.vocab = vocab
+        self.data = {m: load_pickle(self.pickle_data_path[m]) for m in modes} 
     
-    # borrowed this implementation from load_glove of tvqa_dataset.py (TVQA)
+    # borrowed this implementation from load_glove of tvqa_dataset.py (TVQA),
+    # which borrowed from @karpathy's neuraltalk.
     def build_word_vocabulary(self, word_count_threshold=0):
-        """borrowed this implementation from @karpathy's neuraltalk."""
 
         print("Building word vocabulary starts.")
         print('Merging QA and subtitles.')
@@ -324,9 +319,9 @@ class TextData:
 
         modes_str = "/".join(modes)
         print("Glove Loaded. Building vocabulary from %s QA-subtitle data and visual." % (modes_str))
-        texts = {mode: load_json(self.json_data_path[mode]) for mode in modes}
+        self.raw_texts = {mode: load_json(self.json_data_path[mode]) for mode in modes}
         all_sentences = []
-        for text in texts.values():
+        for text in self.raw_texts.values():
             for e in text:
                 for k in self.line_keys:
                     all_sentences.append(e[k])
@@ -336,7 +331,7 @@ class TextData:
 
                 subtitle = e['subtitle']
 
-                if subtitle is not empty_sub:
+                if subtitle != empty_sub:
                     for sub in subtitle['contained_subs']:
                         for k in self.contained_subs_keys:
                             all_sentences.append(sub[k])
@@ -407,7 +402,7 @@ class TextData:
         glove_matrix = np.zeros([len(idx2word), embedding_dim])
         n_glove = n_unk = n_name = n_zero = 0
         unk_words = []
-        for i in tqdm(range(len(idx2word))):
+        for i in range(len(idx2word)):
             w = idx2word[i]
 
             if w.title() in speaker_name[1:]: # Remove 'None' from speaker name to use GloVe vector.
@@ -433,26 +428,51 @@ class TextData:
               '%d words (%s) are initialized as 0, and '
               '%d words (%s) are initialized with %s GloVe vectors.' 
               % (n_glove, n_name, n_zero, pad_token, n_unk, ' '.join(unk_words), unk_token))
-
         print("Building vocabulary done.")
 
-        vocab = torch.Tensor(glove_matrix) 
-        set_vocab_attr(vocab, idx2word, word2idx, self.special_tokens) # Add attributes to vocab 
+        vocab = Vocab(glove_matrix, idx2word, word2idx, self.special_tokens)
 
         print("Saving vocab as pickle.")
-        save_vocab(vocab, self.vocab_path)
+        save_pickle(vocab, self.vocab_path)
 
+        return vocab
+
+    def preprocess_text(self, vocab):
         print('Splitting long subtitles and converting words in text data to indices, timestamps from string to float.')
-        for mode, text in texts.items():
-            texts[mode] = self.preprocess_text(text, vocab)
+        word2idx = vocab.stoi
+        texts = self.raw_texts # self.raw_texts is assigned in self.build_word_vocabulary
+        for text in texts.values():
+            for e in text:
+                for k in self.line_keys:
+                    e[k] = self.line_to_indices(e[k], word2idx)
+
+                for k in self.list_keys:
+                    e[k] = [self.line_to_indices(line, word2idx) for line in e[k]]
+
+                subtitle = e['subtitle']
+
+                if subtitle != empty_sub:
+                    subtitle['et'] = float(subtitle['et'])
+                    subtitle['st'] = float(subtitle['st'])
+
+                    new_subs = []
+
+                    for sub in subtitle['contained_subs']:
+                        sub['et'] = float(sub['et'])
+                        sub['st'] = float(sub['st'])
+                        sub['speaker'] = speaker_index[sub['speaker']] # to speaker index
+                        split_subs = self.split_subtitle(sub, to_indices=True, word2idx=word2idx)
+                        new_subs.extend(split_subs)
+
+                    subtitle['contained_subs'] = new_subs
 
         print("Saving converted data as pickle.")
         for mode in modes:
-            save_pickle(texts[mode], self.pickle_data_path[mode]) 
+            save_pickle(texts[mode], self.pickle_data_path[mode])
 
-        return vocab, texts
+        del self.raw_texts
 
-    # borrowed this implementation from load_glove of tvqa_dataset.py (TVQA)
+    # borrowed this implementation from TVQA (load_glove of tvqa_dataset.py)
     def load_glove(self, glove_path):
         glove = {}
 
@@ -478,7 +498,7 @@ class TextData:
 
         utters = self.split_string(sub['utter'], sos=sos, eos=eos)
         if to_indices:
-            utters = [self.words_to_indices(words, word2idx) for words in utters] # 
+            utters = [self.words_to_indices(words, word2idx) for words in utters]
 
         if len(utters) == 1: 
             sub['utter'] = utters[0]
@@ -494,7 +514,6 @@ class TextData:
 
         return subs
 
-    
     # Split a string with multiple sentences to multiple strings with one sentence.
     def split_string(self, string, min_sen_len=3, sos=True, eos=True):
         split = self.eos_re.split(string)
@@ -535,12 +554,12 @@ class TextData:
 
     def clean_string(self, string):
         string = re.sub(r"[^A-Za-z0-9!?.]", " ", string) # remove all special characters except ! ? .
-        string = re.sub(r"(\.){2,}", ".", string) 
+        string = re.sub(r"\.{2,}", ".", string) 
         string = re.sub(r"\s{2,}", " ", string)
 
         return string.strip()
 
-    # borrowed this implementation from line_to_words of tvqa_dataset.py (TVQA)
+    # borrowed this implementation from TVQA (line_to_words of tvqa_dataset.py)
     def line_to_words(self, line, sos=True, eos=True, downcase=True):
         line = self.clean_string(line)
         tokens = self.tokenizer(line.lower()) if downcase else self.tokenizer(line)
@@ -562,71 +581,31 @@ class TextData:
 
         return indices
 
-    def preprocess_text(self, text, vocab):
-        word2idx = vocab.word2idx
-
-        for e in text:
-            for k in self.line_keys:
-                e[k] = self.line_to_indices(e[k], word2idx)
-
-            for k in self.list_keys:
-                e[k] = [self.line_to_indices(line, word2idx) for line in e[k]]
-
-            subtitle = e['subtitle']
-
-            if subtitle is not empty_sub:
-                subtitle['et'] = float(subtitle['et'])
-                subtitle['st'] = float(subtitle['st'])
-
-                new_subs = []
-
-                for sub in subtitle['contained_subs']:
-                    sub['et'] = float(sub['et'])
-                    sub['st'] = float(sub['st'])
-                    sub['speaker'] = speaker_index[sub['speaker']] # to speaker index
-                    split_subs = self.split_subtitle(sub, to_indices=True, word2idx=word2idx)
-                    new_subs.extend(split_subs)
-
-                subtitle['contained_subs'] = new_subs
-
-        return text
-
     def merge_text_data(self):
         for mode in modes:
             ext = '.json'
             new_path = self.json_data_path[mode] 
             qa_path = new_path.parent / (new_path.stem[:new_path.stem.find('_script')] + ext)
             subtitle_path = self.args.subtitle_path
-
             merge_qa_subtitle(new_path, qa_path, subtitle_path)
-            make_jsonl(new_path)
 
 
-# Add attributes to vocab (for extended functionality and compatibility)
-def set_vocab_attr(vocab, idx2word, word2idx, special_tokens):
-    setattr(vocab, 'idx2word', idx2word) # vocab.idx2word = idx2word
-    setattr(vocab, 'itos', idx2word) # vocab.itos = idx2word (for compatibility)
-    setattr(vocab, 'get_word', lambda idx: getattr(vocab, 'idx2word')[idx]) # vocab.get_word(idx) = vocab.idx2word[idx]
+def get_data_path(args, mode='train', ext='.json'):
+    name = args.data_path.name.split('_')
+    name.insert(1, mode)
+    name = '_'.join(name)
+    path = args.data_path.parent / name
+    path = path.parent / (path.stem + ext)
 
-    setattr(vocab, 'word2idx', word2idx) # vocab.word2idx = word2idx
-    setattr(vocab, 'stoi', word2idx) # vocab.stoi = word2idx (for compatibility)
-    setattr(vocab, 'get_index', lambda word: getattr(vocab, 'word2idx').get(word, getattr(vocab, 'word2idx')[unk_token])) # vocab.get_index(word) = vocab.get_index.get(word, vocab.word2idx[unk_token])
-
-    setattr(vocab, 'specials', special_tokens) # vocab.specials = self.special_tokens (['<sos>', '<eos>', '<pad>', '<unk>'])
-    setattr(vocab, 'special_ids', [vocab.stoi[k] for k in vocab.specials]) # vocab.special_ids = 
-    for token in vocab.specials:
-        setattr(vocab, token[1:-1], token) # vocab.sos = '<sos>' ... 
-
-    return vocab
+    return path
 
 class MultiModalData(Dataset):
-    def __init__(self, args, text_data, image_data, mode='train'):
+    def __init__(self, args, text_data, image_data, mode):
         if mode not in modes:
             raise ValueError("mode should be %s." % (' or '.join(modes)))
 
         self.args = args
         self.mode = mode
-        self.device = args.device
 
         ###### Text ######
         self.text = text_data.data[mode]
@@ -650,24 +629,24 @@ class MultiModalData(Dataset):
         return len(self.text)
 
     def __getitem__(self, idx):
-        data = self.text[idx]
-        vid = data['vid']
+        text = self.text[idx]
+        que = text['que']
+        ans = text['answers'] 
+        subtitle = text['subtitle']
+        correct_idx = text['correct_idx'] if self.mode != 'test' else None
+        q_level_logic = text['q_level_logic']
+        shot_contained = text['shot_contained'] 
+        vid = text['vid']
         episode = get_episode_id(vid)
         scene = get_scene_id(vid)
-        que = data['que']
-        ans = data['answers'] 
-        subtitle = data['subtitle']
-        correct_idx = data['correct_idx'] if self.mode != 'test' else None
-        q_level_logic = data['q_level_logic']
-        shot_contained = data['shot_contained'] 
 
-        speaker = []; sub = [] 
-        image = []; all_image = []
-
-        sample_visual = [] # just one visual
-        sub_visual = [] # visual for each subtitle
-        all_visual = [] # all visual in subtitles
-        all_person_full = []
+        spkr_by_sen_l = []  # list of speaker of subtitle sentences
+        sub_by_sen_l = []   # list of subtitle sentences
+        mean_fi_l = []      # list of meaned full_image features        
+        all_fi_l = []       # list of all full_image features 
+        all_pfu_l = []      # list of all person_full features
+        sample_v_l = []     # list of one sample visual
+        all_v_l = []        # list of all visual
 
         if subtitle != empty_sub: # subtitle exists
             subs = subtitle["contained_subs"]
@@ -675,112 +654,101 @@ class MultiModalData(Dataset):
             for s in subs:
                 spkr = s["speaker"]
                 utter = s["utter"]
-                speaker.append(spkr)
+                spkr_by_sen_l.append(spkr)
                 if len(utter) > self.max_sen_len:
                     del utter[self.max_sen_len:]
                     utter[-1] = self.eos_index
-                sub.append(utter)
+                sub_by_sen_l.append(utter)
 
                 # # get image by st and et
                 # st = s["st"]
                 # et = s["et"]
                 # if et - st > 90: 
                 #     et = st + 3
-                # img, all_img, sample_vis, all_vis, all_p_full = self.image.get_image_by_time(episode, st, et)
-                # image.append(img)
-                # all_image.extend(all_img)
-                # sample_visual.append(sample_vis)
-                # sub_visual.append(all_vis)
-                # all_visual.extend(all_vis)
-                # all_person_full.extend(all_p_full)
+                # mean_fi, all_fi, sample_v, all_v, all_pfu = self.image.get_image_by_time(episode, st, et)
+                # mean_fi_l.append(mean_fi)
+                # all_fi_l.extend(all_fi)
+                # sample_v_l.append(sample_v)
+                # all_v_l.extend(all_v)
+                # all_pfu_l.extend(all_pfu)
 
             # get image by shot_contained
-            img, all_img, sample_vis, all_vis, all_p_full = self.image.get_image_by_vid(episode, scene, shot_contained) # get all image in the scene/shot
-            image.append(img)
-            all_image.extend(all_img)
-            sample_visual.append(sample_vis)
-            sub_visual.append(all_vis)
-            all_visual.extend(all_vis)
-            all_person_full.extend(all_p_full)
+            mean_fi, all_fi, sample_v, all_v, all_pfu = self.image.get_image_by_vid(episode, scene, shot_contained) # get all image in the scene/shot
+            mean_fi_l.append(mean_fi)
+            all_fi_l.extend(all_fi)
+            sample_v_l.append(sample_v)
+            all_v_l.extend(all_v)
+            all_pfu_l.extend(all_pfu)
         else: # No subtitle
-            speaker.append(self.none_index) # add None speaker
-            sub.append([self.pad_index]) # add <pad>
-            img, all_img, sample_vis, all_vis, all_p_full = self.image.get_image_by_vid(episode, scene, shot_contained) # get all image in the scene/shot
-            image.append(img)
-            all_image.extend(all_img)
-            sample_visual.append(sample_vis)
-            sub_visual.append(all_vis)
-            all_visual.extend(all_vis)            
-            all_person_full.extend(all_p_full)
+            spkr_by_sen_l.append(self.none_index) # add None speaker
+            sub_by_sen_l.append([self.pad_index]) # add <pad>
+            mean_fi, all_fi, sample_v, all_v, all_pfu = self.image.get_image_by_vid(episode, scene, shot_contained) # get all image in the scene/shot
+            mean_fi_l.append(mean_fi)
+            all_fi_l.extend(all_fi)
+            sample_v_l.append(sample_v)
+            all_v_l.extend(all_v)            
+            all_pfu_l.extend(all_pfu)
 
-        ###### Concatenated data ######
-        filtered_sub = []; filtered_speaker = []
-        filtered_vis = []; filtered_img = []; filtered_pf = []
-
-        # Concatenate subtitles 
-        n_words = 0
+        # Concatenate subtitle sentences
+        sub_by_word_l = []; spkr_by_word_l = []
         max_sub_len = self.max_sub_len
-        for spkr, s in zip(speaker, sub):
+        n_words = 0
+        for spkr, s in zip(spkr_by_sen_l, sub_by_sen_l):
             sen_len = len(s)
             n_words += sen_len
 
-            filtered_sub.extend(s)
-            filtered_speaker.extend(spkr for i in range(sen_len)) # 1:1 correspondence between word and speaker
+            sub_by_word_l.extend(s)
+            spkr_by_word_l.extend(spkr for i in range(sen_len)) # 1:1 correspondence between word and speaker
 
             if n_words > max_sub_len:
-                del filtered_sub[max_sub_len:] # filtered_sub = filtered_sub[:self.max_script_len]
-                filtered_sub[-1] = self.eos_index
-                del filtered_speaker[max_sub_len:] # filtered_speaker = filtered_speaker[:self.max_script_len]
+                del sub_by_word_l[max_sub_len:], spkr_by_word_l[max_sub_len:] 
+                sub_by_word_l[-1] = self.eos_index
 
                 break
 
-        # Concatenate images and visuals 
+        # Remove paddings in between and flatten visuals 
+        filtered_v = []; filtered_fi = []; filtered_pfu = []
+        max_img_len = self.max_image_len
         n_img = 0
-        max_image_len = self.max_image_len
-        for vis, img, pf in zip(all_visual, all_image, all_person_full):
-            if vis != self.image.visual_pad:
-                filtered_vis.extend(vis)
-                filtered_img.append(img)
-                filtered_pf.append(pf)
+        for v, fi, pfu in zip(all_v_l, all_fi_l, all_pfu_l):
+            if v != self.image.visual_pad:
+                filtered_v.extend(v) # flatten visuals 
+                filtered_fi.append(fi)
+                filtered_pfu.append(pfu)
                 n_img += 1
-                if n_img > max_image_len:
-                    del filtered_img[max_image_len:]
-                    del filtered_vis[max_image_len * 3:]
-                    del filtered_pf[max_image_len:]
+                if n_img > max_img_len:
+                    del filtered_fi[max_img_len:], filtered_v[max_img_len * 3:], filtered_pfu[max_img_len:]
 
                     break
 
-        ###### Pad empty data ######
-        if not filtered_sub: # empty
-            filtered_sub.append(self.pad_index)
-            filtered_speaker.append(self.none_index)
+        # Pad empty data
+        if not sub_by_word_l: # empty
+            sub_by_word_l.append(self.pad_index)
+            spkr_by_word_l.append(self.none_index)
 
-        if not filtered_vis: # empty
-            filtered_vis = self.image.visual_pad
-            filtered_img = all_image
-
-            if len(filtered_img) > max_image_len:
-                del filtered_img[max_image_len:]
-
-        if not filtered_pf: # empty
-            filtered_pf.append(np.zeros(self.image_dim))
+        if not filtered_v: # empty: filtered_v, filtered_fi, and filtered_pfu are empty at the same time
+            filtered_v = self.image.visual_pad
+            filtered_pfu.append(np.zeros(self.image_dim))
+            filtered_fi = all_fi_l # use all image
+            if len(filtered_fi) > max_img_len:
+                del filtered_fi[max_img_len:]
 
         data = {
             'que': que,
             'ans': ans,
             'correct_idx': correct_idx,
-            'sub': sub,
-            'speaker': speaker,
-            'image': image,
-            'all_image': all_image,
-            'sample_visual': sample_visual,
-            'sub_visual': sub_visual,
-            'all_visual': all_visual,
-            'filtered_speaker': filtered_speaker,
-            'filtered_sub': filtered_sub,
-            'filtered_image': filtered_img,
-            'filtered_visual': filtered_vis,
-            'filtered_person_full': filtered_pf,
+
+            'sub_by_sen': sub_by_sen_l,
+            'spkr_by_sen': spkr_by_sen_l,
+            'mean_fi': mean_fi_l,
+            'sample_v': sample_v_l,
+
+            'spkr_by_word': spkr_by_word_l,
+            'sub_by_word': sub_by_word_l,
+            'filtered_fi': filtered_fi,
+            'filtered_v': filtered_v,
+            'filtered_pfu': filtered_pfu,
+
             'q_level_logic': q_level_logic,
         }
         
@@ -794,52 +762,51 @@ class MultiModalData(Dataset):
             for key, value in data.items():
                 collected[key].append(value)
 
-        p_que, p_que_len = self.pad2d(collected['que'], self.pad_index, int_dtype)
-        p_ans, _, p_ans_len = self.pad3d(collected['ans'], self.pad_index, int_dtype)
-        p_correct_idx = torch.tensor(collected['correct_idx'], dtype=int_dtype) if self.mode != 'test' else None # correct_idx does not have to be padded
+        que, que_l = self.pad2d(collected['que'], self.pad_index, int_dtype)
+        ans, _, ans_l = self.pad3d(collected['ans'], self.pad_index, int_dtype)
+        correct_idx = torch.tensor(collected['correct_idx'], dtype=int_dtype) if self.mode != 'test' else None # correct_idx does not have to be padded
         
-        p_speaker, _ = self.pad2d(collected['speaker'], self.none_index, int_dtype)
-        p_image, _, _ = self.pad3d(collected['image'], 0, float_dtype)
-        p_sample_visual, _, _ = self.pad3d(collected['sample_visual'], self.image.visual_pad, int_dtype)
-        p_sub, p_sub_len, p_sub_sentence_len = self.pad3d(collected['sub'], self.pad_index, int_dtype)
+        spkr_by_s, _ = self.pad2d(collected['spkr_by_sen'], self.none_index, int_dtype)
+        mean_fi, _, _ = self.pad3d(collected['mean_fi'], 0, float_dtype)
+        sample_v, _, _ = self.pad3d(collected['sample_v'], self.image.visual_pad, int_dtype)
+        sub_by_s, sub_by_s_l, sub_s_l = self.pad3d(collected['sub_by_sen'], self.pad_index, int_dtype)
 
-        p_f_speaker, _ = self.pad2d(collected['filtered_speaker'], self.none_index, int_dtype)
-        p_f_sub, p_f_sub_len = self.pad2d(collected['filtered_sub'], self.pad_index, int_dtype)
-        p_f_visual, p_f_visual_len = self.pad2d(collected['filtered_visual'], self.image.visual_pad, int_dtype)
-        p_f_image, p_f_image_len, _ = self.pad3d(collected['filtered_image'], 0, float_dtype)
-        p_f_person_full, p_f_person_full_len, _ = self.pad3d(collected['filtered_person_full'], 0, float_dtype) 
+        f_v, f_v_l = self.pad2d(collected['filtered_v'], self.image.visual_pad, int_dtype)
+        f_fi, f_fi_l, _ = self.pad3d(collected['filtered_fi'], 0, float_dtype)
+        f_pfu, f_pfu_l, _ = self.pad3d(collected['filtered_pfu'], 0, float_dtype) 
+        spkr_by_w, _ = self.pad2d(collected['spkr_by_word'], self.none_index, int_dtype)
+        sub_by_w, sub_by_w_l = self.pad2d(collected['sub_by_word'], self.pad_index, int_dtype)
 
-        p_q_level_logic = collected['q_level_logic'] # No need to convert to torch.Tensor
+        q_level_logic = collected['q_level_logic'] # No need to convert to torch.Tensor
         
         data = {
-            'que': p_que,
-            'answers': p_ans, 
-            'subtitle': p_sub, 
-            'speaker': p_speaker, 
+            'que': que,
+            'answers': ans, 
+            'que_len': que_l,
+            'ans_len': ans_l,
 
-            'images': p_image,
-            'sample_visual': p_sample_visual,
+            'subtitle': sub_by_s, 
+            'speaker': spkr_by_s, 
+            'images': mean_fi,
+            'sample_visual': sample_v,
+            'sub_len': sub_by_s_l,
+            'sub_sentence_len': sub_s_l,
 
-            'filtered_visual': p_f_visual,
-            'filtered_sub': p_f_sub,
-            'filtered_speaker': p_f_speaker,
-            'filtered_image': p_f_image,
-            'filtered_person_full': p_f_person_full,
-            'q_level_logic': p_q_level_logic,
+            'filtered_visual': f_v,
+            'filtered_sub': sub_by_w,
+            'filtered_speaker': spkr_by_w,
+            'filtered_image': f_fi,
+            'filtered_person_full': f_pfu,
+            'filtered_visual_len': f_v_l,
+            'filtered_sub_len': sub_by_w_l,
+            'filtered_image_len': f_fi_l,
+            'filtered_person_full_len': f_pfu_l,
 
-            'que_len': p_que_len,
-            'ans_len': p_ans_len,
-            'sub_len': p_sub_len,
-            'sub_sentence_len': p_sub_sentence_len,
-
-            'filtered_visual_len': p_f_visual_len,
-            'filtered_sub_len': p_f_sub_len,
-            'filtered_image_len': p_f_image_len,
-            'filtered_person_full_len': p_f_person_full_len,
+            'q_level_logic': q_level_logic,
         }
 
-        if p_correct_idx is not None:
-            data['correct_idx'] = p_correct_idx
+        if correct_idx is not None:
+            data['correct_idx'] = correct_idx
 
         return data
 
@@ -848,7 +815,6 @@ class MultiModalData(Dataset):
         length = [len(row) for row in data]
         max_length = max(length)
         shape = (batch_size, max_length)
-
         p_length = torch.tensor(length, dtype=int_dtype) # no need to pad
 
         if isinstance(pad_val, list):
@@ -868,9 +834,7 @@ class MultiModalData(Dataset):
         dim2_length = [[len(dim2) for dim2 in dim1] for dim1 in data]
         max_dim1_length = max(len(dim1) for dim1 in data)
         max_dim2_length = max(l for row in dim2_length for l in row)
-
         data_shape = (batch_size, max_dim1_length, max_dim2_length)
-        
         p_dim2_length, p_dim1_length = self.pad2d(dim2_length, 0, int_dtype)
 
         if isinstance(pad_val, list):
@@ -887,6 +851,13 @@ class MultiModalData(Dataset):
 
         return p_data, p_dim1_length, p_dim2_length
 
+def get_tokenizer(args):
+    tokenizers = {
+        'nltk': nltk.word_tokenize,
+        'nonword': re.compile(r'\W+').split,
+    }
+
+    return tokenizers[args.tokenizer.lower()]
 
 def load_data(args, vocab=None):
     print('Load Text Data')
@@ -928,16 +899,13 @@ def load_data(args, vocab=None):
     print('-------- TESTING DATA LOADING --------')
 
     train_iter_test = next((iter(train_iter)))
-    # list(print(key, value.shape) for key, value in train_iter_test.items() if isinstance(value, torch.Tensor))
-    pprint(train_iter_test)
-    print()
+    list(print(key, value.shape) for key, value in train_iter_test.items() if isinstance(value, torch.Tensor))
+    # pprint(train_iter_test)
+    # print()
 
     # import sys 
     # print('Debug - Terminate')
     # sys.exit()
-
-    for key, value in train_iter_test.items():
-        print(key, value)
 
     from utils import prepare_batch
 
@@ -962,15 +930,7 @@ def load_data(args, vocab=None):
 
     return {'train': train_iter, 'val': val_iter, 'test': test_iter}, vocab
 
-def get_tokenizer(args):
-    tokenizers = {
-        'nltk': nltk.word_tokenize,
-        'nonword': re.compile('[\W]').split,
-    }
 
-    return tokenizers[args.tokenizer.lower()]
-
-# batch: [len, batch_size]
 def get_iterator(args, vocab=None):
     iters, vocab = load_data(args, vocab)
     print("Data Loading Done")

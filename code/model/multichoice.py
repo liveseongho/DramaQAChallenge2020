@@ -19,7 +19,7 @@ class MultiChoice(nn.Module):
     def __init__(self, args, vocab, n_dim, image_dim, layers, dropout, num_choice=5):
         super().__init__()
 
-        self.text_feature_names = args.text_feature_names
+        # self.text_feature_names = args.text_feature_names
         self.feature_names = args.use_inputs
 
         self.vocab = vocab
@@ -93,21 +93,21 @@ class MultiChoice(nn.Module):
 
     def load_embedding(self, pretrained_embedding):
         print('Load pretrained embedding ...')
-        self.embedding.weight.data.copy_(pretrained_embedding)
-        #self.embedding.weight.data.copy_(torch.from_numpy(pretrained_embedding))
+        # self.embedding.weight.data.copy_(pretrained_embedding)
+        self.embedding.weight.data.copy_(torch.from_numpy(pretrained_embedding))
 
     @classmethod
     def resolve_args(cls, args, vocab):
         return cls(args, vocab, args.n_dim, args.image_dim, args.layers, args.dropout)
 
-    def process_feature(self, q, name, feature):
-        if name in self.text_feature_names:
-            feature = self.embedding(feature)
+    # def process_feature(self, q, name, feature):
+    #     if name in self.text_feature_names:
+    #         feature = self.embedding(feature)
 
-        feature = self.feature_encoders[name](feature)
-        feature = feature.mean(dim=1)
-        q = self.feature_fusers[name](q, feature)
-        return q
+    #     feature = self.feature_encoders[name](feature)
+    #     feature = feature.mean(dim=1)
+    #     q = self.feature_fusers[name](q, feature)
+    #     return q
 
 
     def len_to_mask(self, lengths, len_max):
