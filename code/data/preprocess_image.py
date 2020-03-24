@@ -2,6 +2,7 @@ import math
 import os
 from collections import defaultdict
 
+import PIL
 from PIL import Image
 from tqdm import tqdm
 
@@ -12,58 +13,58 @@ from utils import *
 
 from .vision import VisionDataset
 
-from pprint import pprint
-
+image_types = ['full_image', 'person_full']
 image_size = [224, 224]
 delimiter = '/'
 
 def dict_for_each_episode():
     return [dict() for i in range(18 + 1)]  # episode index: from 1 to 18
 
-def get_model(device):
-    print('Loading extractor model: Using ResNet18')
+def get_model(args):
+    print('Loading extractor model: using resnet18')
 
     model = models.resnet18(pretrained=True)
     extractor = nn.Sequential(*list(model.children())[:-2])
-    extractor.to(device)
+    extractor.to(args.device)
 
     return extractor
 
-def preprocess_images(args, image_path, cache=True, device=-1, num_workers=40):
-    print('Loading Visual')
+def preprocess_images(args):
+    print('Loading visual')
     visuals = load_visual(args)
 
-    if not (image_path / 'cache').is_dir():
-        (image_path / 'cache').mkdir()
+    image_path = args.image_path
+    cache_dir = image_path / 'cache'
+    if not cache_dir.is_dir():
+        cache_dir.mkdir()
 
-    full_image_cache_path  = image_path / 'cache' / 'full_image.pickle'
-    person_full_cache_path = image_path / 'cache' / 'person_full.pickle'
+    cached = {}
+    not_cached = {}
+    ext = '.pickle'
+    for key in image_types:
+        cache_path = cache_dir / (key + ext)
+        if cache_path.is_file():
+            cached[key] = cache_path
+        else:
+            not_cached[key] = cache_path
 
-    cached = {
-        'full_image':  full_image_cache_path.is_file(),
-        'person_full': person_full_cache_path.is_file()
-    }
+    features = {key: dict_for_each_episode() for key in image_types}
 
-    full_images  = dict_for_each_episode()
-    person_fulls = dict_for_each_episode()
+    for key, path in cached.items():
+        print("Loading %s feature cache" % key)
+        features[key] = load_pickle(path)
 
-    if cached['full_image']:
-        print("Loading Full Image Feature Cache")
-        full_images = load_pickle(full_image_cache_path)
-
-    if cached['person_full']:
-        print("Loading Person Full Feature Cache")
-        person_fulls = load_pickle(person_full_cache_path)
-    
-    if not cached['full_image'] or not cached['person_full']:
-        print("Loading Image Files and Building Full Image / Person Full Feature Cache")
+    if not_cached: # not_cached not empty: some image types are not cached
+        not_cached_types = ', '.join(not_cached)
+        print('%s feature cache missing' % not_cached_types)
+        print('Loading image files and extracting %s features' % not_cached_types)
         
         transform = transforms.Compose([
             transforms.Resize(image_size),
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
-        model = get_model(device)
+        model = get_model(args)
         episode_paths = list(image_path.glob('*'))
         for e in tqdm(episode_paths, desc='Episode'):
             shot_paths = list(e.glob('*/*'))  # episode/scene/shot
@@ -71,32 +72,23 @@ def preprocess_images(args, image_path, cache=True, device=-1, num_workers=40):
             # Load image and flatten
             images = load_images(shot_paths)
             images = {"{}{}{}".format(vid, delimiter, name): image for vid, shots in images.items() for name, image in shots.items()}
-            dataset = ObjectDataset(args, images, visuals, transform=transform)
+            dataset = ObjectDataset(args, images, visuals, not_cached, transform=transform)
             
-            full_images_chunk, person_fulls_chunk = extract_features(
-                args, dataset, model, cached, device=device, num_workers=num_workers, 
-                extractor_batch_size=args.extractor_batch_size
-            )
+            chunk = extract_features(args, dataset, model)
 
-            for total, part in zip(full_images, full_images_chunk):
-                total.update(part)
-
-            for total, part in zip(person_fulls, person_fulls_chunk):
-                total.update(part)
+            for key in image_types:
+                for episode_total, episode_part in zip(features[key], chunk[key]):
+                    episode_total.update(episode_part)
             
             del images, dataset # delete data to retrieve memory
         del model # delete extractor model to retrieve memory
 
-        if cache:
-            if not cached['full_image']:
-                print("Saving Full Image Feature Cache As", full_image_cache_path)
-                save_pickle(full_images, full_image_cache_path)
+        if args.cache_image_vectors:
+            for key, path in not_cached.items():
+                print("Saving %s feature cache as %s" % (key, path))
+                save_pickle(features[key], path)
 
-            if not cached['person_full']:
-                print("Saving Person Full Feature Cache As", person_full_cache_path)
-                save_pickle(person_fulls, person_full_cache_path)
-
-    return full_images, person_fulls, visuals
+    return features, visuals
 
 def load_images(shot_paths):
     """
@@ -148,56 +140,69 @@ def load_visual(args):
     return visual_by_episode
 
 class ObjectDataset(VisionDataset):
-    def __init__(self, args, images, visuals, **kwargs):
+    def __init__(self, args, images, visuals, not_cached, **kwargs):
         super(ObjectDataset, self).__init__('~/', **kwargs)
 
         self.args = args
         self.images = list([(k, v) for k, v in images.items()])
         self.visuals = visuals
+        self.not_cached = not_cached
 
     def __len__(self):
         return len(self.images)
 
     def __getitem__(self, idx):
-        key, pil_full_img = self.images[idx]
+        key, pil_full_image = self.images[idx]
 
         episode = get_episode_id(key)
         frame = get_frame_id(key)
+        visual = self.visuals[episode].get(frame, None)
+        data = {'key': (episode, frame)}  
 
         if self.transform is not None:
-            full_img = self.transform(pil_full_img)  
+            full_image = self.transform(pil_full_image)
 
+        if 'full_image' in self.not_cached:
+            data['full_image'] = full_image
+
+        if 'person_full' in self.not_cached:
+            data['person_full'] = self.get_person_full(pil_full_image, visual, full_image) # use full image for padding 
+
+        return data
+
+    def collate_fn(self, batch):
+        collected = defaultdict(list) 
+        for data in batch:
+            for key, value in data.items():
+                collected[key].append(value)
+
+        if 'full_image' in self.not_cached:
+            collected['full_image'] = torch.stack(collected['full_image'])
+
+        return collected
+
+    def get_person_full(self, pil_full_image, visual, padding):
         person_fulls = []
-        visuals = self.visuals[episode]
-        if frame in visuals:
-            persons = visuals[frame]["persons"]
-
+        if visual is not None:
+            persons = visual["persons"]
             for p in persons:
                 full_rect = p["person_info"]["full_rect"]
 
                 if full_rect["max_x"] != '':
-                    person_full = transforms.functional.crop(pil_full_img, *self.bbox_transform(full_rect))
+                    person_full = transforms.functional.crop(pil_full_image, *self.bbox_transform(full_rect))
                     if self.transform is not None:
                         person_full = self.transform(person_full)
-                else: # no bounding box: use full image
-                    person_full = full_img
+                else: # no bounding box
+                    person_full = padding
 
                 person_fulls.append(person_full)
 
-        if not person_fulls: # empty (no visual data or no person) - use full image
-            person_fulls.append(full_img)
+        if not person_fulls: # empty (no visual data or no person)
+            person_fulls.append(padding)
 
         person_fulls = torch.stack(person_fulls)
 
-        return (episode, frame), full_img, person_fulls
-
-    def collate_fn(self, batch):
-        keys, full_imgs, person_fulls = zip(*batch)
-
-        full_imgs = torch.stack(full_imgs)
-        person_fulls = list(person_fulls)
-
-        return keys, full_imgs, person_fulls
+        return person_fulls
 
     def bbox_transform(self, rect):
         """min_x, min_y, max_x, max_y -> top left corner coordinates, height, width"""
@@ -215,14 +220,14 @@ def mean_pool(tensor, dim):
 
 def extract_and_pool(tensor, model, device):
     tensor = tensor.to(device)
-    tensor = model(tensor)          # N X C x H x W (N: extractor_batch_size / number of person fulls in a frame, C: 512)
-    tensor = mean_pool(tensor, -1)  # N X C x H 
-    tensor = mean_pool(tensor, -1)  # N X C
+    tensor = model(tensor)          # N x C x H x W (N: extractor_batch_size / number of person fulls in a frame, C: 512)
+    tensor = mean_pool(tensor, -1)  # N x C x H 
+    tensor = mean_pool(tensor, -1)  # N x C
     tensor = tensor.cpu().numpy()
 
     return tensor
 
-def extract_features(args, dataset, model, cached, device=-1, num_workers=1, extractor_batch_size=384):
+def extract_features(args, dataset, model):
     """
     full_images_by_episode = [
         {}, # empty dict
@@ -257,36 +262,33 @@ def extract_features(args, dataset, model, cached, device=-1, num_workers=1, ext
     ]
     """
 
+    device = args.device
+    not_cached = dataset.not_cached
     dataloader = utils.data.DataLoader(
         dataset,
-        batch_size=extractor_batch_size,
+        batch_size=args.extractor_batch_size,
         shuffle=False,
-        num_workers=num_workers,
+        num_workers=args.num_workers,
         collate_fn=dataset.collate_fn
     )
 
     model.eval()
-    full_images_by_episode  = dict_for_each_episode()
-    person_fulls_by_episode = dict_for_each_episode()
+    features = {key: dict_for_each_episode() for key in image_types}
     with torch.no_grad():
-        for data in tqdm(dataloader, total=math.ceil(len(dataset) / extractor_batch_size), desc='extracting features'):
-            keys, full_imgs, person_fulls = data
+        for data in tqdm(dataloader, desc='extracting features'):
+            keys = data['key']
 
-            if not cached['full_image']:
-                full_imgs = extract_and_pool(full_imgs, model, device) 
+            if 'full_image' in not_cached:
+                full_images = extract_and_pool(data['full_image'], model, device) 
+                for (e, f), fi, in zip(keys, full_images):
+                    features['full_image'][e][f] = fi
 
-                for (e, f), fi, in zip(keys, full_imgs):
-                    full_images_by_episode[e][f] = fi
-
-            if not cached['person_full']:
-                person_fulls = [extract_and_pool(pfu, model, device) for pfu in person_fulls]
-
+            if 'person_full' in not_cached:
+                person_fulls = [extract_and_pool(pfu, model, device) for pfu in data['person_full']]
                 for (e, f), pfu in zip(keys, person_fulls):
-                    person_fulls_by_episode[e][f] = pfu
+                    features['person_full'][e][f] = pfu
     
     del dataloader
 
-    return full_images_by_episode, person_fulls_by_episode
-
-
+    return features
 

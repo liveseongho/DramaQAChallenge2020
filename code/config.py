@@ -20,9 +20,9 @@ config = {
     # 'feature_pooling_method': 'mean', # useless
     'max_epochs': 20,
     # 'allow_empty_images': False, # useless
-    'num_workers': 40,
+    'num_workers': 40, 
     'image_dim': 512,  # hardcoded for ResNet18
-    'n_dim': 300,
+    'n_dim': 300,  
     'layers': 3,
     'dropout': 0.5,
     'learning_rate': 1e-4,

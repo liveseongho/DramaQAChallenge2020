@@ -77,7 +77,6 @@ class Vocab(np.ndarray):
 
     def __setstate__(self, state):
         self.__dict__.update(state[-1])
-
         super(Vocab, self).__setstate__(state[0:-1])
 
     def get_word(self, idx):
@@ -95,24 +94,19 @@ class ImageData:
         self.none_index = speaker_index['None']
         self.visual_pad = [self.none_index, self.pad_index, self.pad_index] 
 
+        self.image_path = args.image_path
         self.image_dim = args.image_dim
-        self.image_dt = self.load_images(
-            args.image_path,
-            cache=args.cache_image_vectors, 
-            device=args.device,
-            num_workers=args.num_workers
-        )
+        self.image_dt = self.load_images(args)
+        self.structure = self.build_structure(args)
 
-        self.structure = self.build_structure()
-
-    def load_images(self, image_path, cache=True, device=-1, num_workers=40):
-        full_images, person_fulls, visuals = preprocess_images(self.args, image_path, cache=cache, device=device, num_workers=num_workers)
-        image_dt = self.attach_visual(full_images, person_fulls, visuals)
+    def load_images(self, args):
+        features, visuals = preprocess_images(args)
+        image_dt = self.join(features, visuals)
 
         return image_dt
 
-    def build_structure(self):
-        image_path = self.args.image_path
+    def build_structure(self, args):
+        image_path = self.image_path
         episode_dirs = sorted(e for e in os.listdir(image_path) if e.startswith("AnotherMissOh"))
 
         episodes = {}
@@ -137,7 +131,7 @@ class ImageData:
 
         return episodes
 
-    def attach_visual(self, full_images, person_fulls, visuals):
+    def join(self, features, visuals):
         """
         After: 
 
@@ -160,6 +154,8 @@ class ImageData:
             }
         ]
         """
+        full_images = features['full_image']
+        person_fulls = features['person_full']
 
         for frames in full_images:
             for key, value in frames.items():
@@ -284,10 +280,12 @@ class TextData:
         self.contained_subs_keys = ['speaker', 'utter']
 
         self.glove_path = args.glove_path
+        self.vocab_path = args.vocab_path
+        self.subtitle_path = args.subtitle_path
+        self.visual_path = args.visual_path
         self.json_data_path = {m: get_data_path(args, mode=m, ext='.json') for m in modes}
         self.pickle_data_path = {m: get_data_path(args, mode=m, ext='.pickle') for m in modes}
-        self.vocab_path = args.vocab_path
-
+        
         self.tokenizer = get_tokenizer(args)
         self.eos_re = re.compile(r'[\s]*[.?!]+[\s]*')        
 
@@ -295,7 +293,7 @@ class TextData:
 
         if vocab is None:
             if os.path.isfile(self.vocab_path): # Use cached vocab if it exists.
-                print('Using cached vocab.')
+                print('Using cached vocab')
                 vocab = load_pickle(self.vocab_path) 
             else: # There is no cached vocab. Build vocabulary and preprocess text data
                 print('There is no cached vocab.')
@@ -336,7 +334,7 @@ class TextData:
                         for k in self.contained_subs_keys:
                             all_sentences.append(sub[k])
 
-        visual = load_json(self.args.visual_path)
+        visual = load_json(self.visual_path)
         text_in_visual = set()
         for frames in visual.values():
             for frame in frames:
@@ -366,7 +364,7 @@ class TextData:
         n_glove_words = len(word_counts)
         n_unk_words = n_all_words - n_glove_words
         print("The number of all unique words in %s data that uses GloVe embeddings: %d. "
-              '%.2f%% words are treated as %s or speaker names' 
+              '%.2f%% words are treated as %s or speaker names.' 
               % (modes_str, n_glove_words, 100 * n_unk_words / n_all_words, unk_token))
 
         # Accept words whose occurence counts are greater or equal to the threshold.
@@ -586,7 +584,7 @@ class TextData:
             ext = '.json'
             new_path = self.json_data_path[mode] 
             qa_path = new_path.parent / (new_path.stem[:new_path.stem.find('_script')] + ext)
-            subtitle_path = self.args.subtitle_path
+            subtitle_path = self.subtitle_path
             merge_qa_subtitle(new_path, qa_path, subtitle_path)
 
 
@@ -640,8 +638,8 @@ class MultiModalData(Dataset):
         episode = get_episode_id(vid)
         scene = get_scene_id(vid)
 
-        spkr_by_sen_l = []  # list of speaker of subtitle sentences
-        sub_by_sen_l = []   # list of subtitle sentences
+        spkr_of_sen_l = []  # list of speaker of subtitle sentences
+        sub_in_sen_l = []   # list of subtitle sentences
         mean_fi_l = []      # list of meaned full_image features        
         all_fi_l = []       # list of all full_image features 
         all_pfu_l = []      # list of all person_full features
@@ -654,11 +652,11 @@ class MultiModalData(Dataset):
             for s in subs:
                 spkr = s["speaker"]
                 utter = s["utter"]
-                spkr_by_sen_l.append(spkr)
+                spkr_of_sen_l.append(spkr)
                 if len(utter) > self.max_sen_len:
                     del utter[self.max_sen_len:]
                     utter[-1] = self.eos_index
-                sub_by_sen_l.append(utter)
+                sub_in_sen_l.append(utter)
 
                 # # get image by st and et
                 # st = s["st"]
@@ -680,8 +678,8 @@ class MultiModalData(Dataset):
             all_v_l.extend(all_v)
             all_pfu_l.extend(all_pfu)
         else: # No subtitle
-            spkr_by_sen_l.append(self.none_index) # add None speaker
-            sub_by_sen_l.append([self.pad_index]) # add <pad>
+            spkr_of_sen_l.append(self.none_index) # add None speaker
+            sub_in_sen_l.append([self.pad_index]) # add <pad>
             mean_fi, all_fi, sample_v, all_v, all_pfu = self.image.get_image_by_vid(episode, scene, shot_contained) # get all image in the scene/shot
             mean_fi_l.append(mean_fi)
             all_fi_l.extend(all_fi)
@@ -690,19 +688,19 @@ class MultiModalData(Dataset):
             all_pfu_l.extend(all_pfu)
 
         # Concatenate subtitle sentences
-        sub_by_word_l = []; spkr_by_word_l = []
+        sub_in_word_l = []; spkr_of_word_l = []
         max_sub_len = self.max_sub_len
         n_words = 0
-        for spkr, s in zip(spkr_by_sen_l, sub_by_sen_l):
+        for spkr, s in zip(spkr_of_sen_l, sub_in_sen_l):
             sen_len = len(s)
             n_words += sen_len
 
-            sub_by_word_l.extend(s)
-            spkr_by_word_l.extend(spkr for i in range(sen_len)) # 1:1 correspondence between word and speaker
+            sub_in_word_l.extend(s)
+            spkr_of_word_l.extend(spkr for i in range(sen_len)) # 1:1 correspondence between word and speaker
 
             if n_words > max_sub_len:
-                del sub_by_word_l[max_sub_len:], spkr_by_word_l[max_sub_len:] 
-                sub_by_word_l[-1] = self.eos_index
+                del sub_in_word_l[max_sub_len:], spkr_of_word_l[max_sub_len:] 
+                sub_in_word_l[-1] = self.eos_index
 
                 break
 
@@ -722,9 +720,9 @@ class MultiModalData(Dataset):
                     break
 
         # Pad empty data
-        if not sub_by_word_l: # empty
-            sub_by_word_l.append(self.pad_index)
-            spkr_by_word_l.append(self.none_index)
+        if not sub_in_word_l: # empty
+            sub_in_word_l.append(self.pad_index)
+            spkr_of_word_l.append(self.none_index)
 
         if not filtered_v: # empty: filtered_v, filtered_fi, and filtered_pfu are empty at the same time
             filtered_v = self.image.visual_pad
@@ -738,13 +736,13 @@ class MultiModalData(Dataset):
             'ans': ans,
             'correct_idx': correct_idx,
 
-            'sub_by_sen': sub_by_sen_l,
-            'spkr_by_sen': spkr_by_sen_l,
+            'sub_in_sen': sub_in_sen_l,
+            'spkr_of_sen': spkr_of_sen_l,
             'mean_fi': mean_fi_l,
             'sample_v': sample_v_l,
 
-            'spkr_by_word': spkr_by_word_l,
-            'sub_by_word': sub_by_word_l,
+            'spkr_of_word': spkr_of_word_l,
+            'sub_in_word': sub_in_word_l,
             'filtered_fi': filtered_fi,
             'filtered_v': filtered_v,
             'filtered_pfu': filtered_pfu,
@@ -766,16 +764,16 @@ class MultiModalData(Dataset):
         ans, _, ans_l = self.pad3d(collected['ans'], self.pad_index, int_dtype)
         correct_idx = torch.tensor(collected['correct_idx'], dtype=int_dtype) if self.mode != 'test' else None # correct_idx does not have to be padded
         
-        spkr_by_s, _ = self.pad2d(collected['spkr_by_sen'], self.none_index, int_dtype)
+        spkr_of_s, _ = self.pad2d(collected['spkr_of_sen'], self.none_index, int_dtype)
         mean_fi, _, _ = self.pad3d(collected['mean_fi'], 0, float_dtype)
         sample_v, _, _ = self.pad3d(collected['sample_v'], self.image.visual_pad, int_dtype)
-        sub_by_s, sub_by_s_l, sub_s_l = self.pad3d(collected['sub_by_sen'], self.pad_index, int_dtype)
+        sub_in_s, sub_in_s_l, sub_s_l = self.pad3d(collected['sub_in_sen'], self.pad_index, int_dtype)
 
         f_v, f_v_l = self.pad2d(collected['filtered_v'], self.image.visual_pad, int_dtype)
         f_fi, f_fi_l, _ = self.pad3d(collected['filtered_fi'], 0, float_dtype)
         f_pfu, f_pfu_l, _ = self.pad3d(collected['filtered_pfu'], 0, float_dtype) 
-        spkr_by_w, _ = self.pad2d(collected['spkr_by_word'], self.none_index, int_dtype)
-        sub_by_w, sub_by_w_l = self.pad2d(collected['sub_by_word'], self.pad_index, int_dtype)
+        spkr_of_w, _ = self.pad2d(collected['spkr_of_word'], self.none_index, int_dtype)
+        sub_in_w, sub_in_w_l = self.pad2d(collected['sub_in_word'], self.pad_index, int_dtype)
 
         q_level_logic = collected['q_level_logic'] # No need to convert to torch.Tensor
         
@@ -785,20 +783,20 @@ class MultiModalData(Dataset):
             'que_len': que_l,
             'ans_len': ans_l,
 
-            'subtitle': sub_by_s, 
-            'speaker': spkr_by_s, 
+            'subtitle': sub_in_s, 
+            'speaker': spkr_of_s, 
             'images': mean_fi,
             'sample_visual': sample_v,
-            'sub_len': sub_by_s_l,
+            'sub_len': sub_in_s_l,
             'sub_sentence_len': sub_s_l,
 
             'filtered_visual': f_v,
-            'filtered_sub': sub_by_w,
-            'filtered_speaker': spkr_by_w,
+            'filtered_sub': sub_in_w,
+            'filtered_speaker': spkr_of_w,
             'filtered_image': f_fi,
             'filtered_person_full': f_pfu,
             'filtered_visual_len': f_v_l,
-            'filtered_sub_len': sub_by_w_l,
+            'filtered_sub_len': sub_in_w_l,
             'filtered_image_len': f_fi_l,
             'filtered_person_full_len': f_pfu_l,
 
@@ -806,13 +804,13 @@ class MultiModalData(Dataset):
         }
 
         if correct_idx is not None:
-            data['correct_idx'] = correct_idx
+            data['correct_idx'] = correct_idx 
 
         return data
 
     def pad2d(self, data, pad_val, dtype):
         batch_size = len(data)
-        length = [len(row) for row in data]
+        length = [len(row) for row in data] 
         max_length = max(length)
         shape = (batch_size, max_length)
         p_length = torch.tensor(length, dtype=int_dtype) # no need to pad
@@ -860,11 +858,11 @@ def get_tokenizer(args):
     return tokenizers[args.tokenizer.lower()]
 
 def load_data(args, vocab=None):
-    print('Load Text Data')
+    print('Loading text data')
     text = TextData(args, vocab)
     vocab = text.vocab
 
-    print('Load Image Data')
+    print('Load image data')
     image = ImageData(args, vocab)
 
     train_dataset = MultiModalData(args, text, image, mode='train')
@@ -895,44 +893,11 @@ def load_data(args, vocab=None):
         collate_fn=test_dataset.collate_fn
     )
 
-    # test
-    print('-------- TESTING DATA LOADING --------')
-
-    train_iter_test = next((iter(train_iter)))
-    list(print(key, value.shape) for key, value in train_iter_test.items() if isinstance(value, torch.Tensor))
-    # pprint(train_iter_test)
-    # print()
-
-    # import sys 
-    # print('Debug - Terminate')
-    # sys.exit()
-
-    from utils import prepare_batch
-
-    print('Test Loading Train Text Data')
-    for batch in tqdm(train_iter):
-        batch = prepare_batch(args, batch, vocab)
-        # pass
-
-
-    print('Test Loading Val Text Data')
-    for batch in tqdm(val_iter):
-        batch = prepare_batch(args, batch, vocab)
-        # pass
-
-    print('Test Loading Test Text Data')
-    for batch in tqdm(test_iter):
-        batch = prepare_batch(args, batch, vocab)
-        # pass
-
-    print('-------- TESTING DATA LOADING END --------')
-    print()
-
     return {'train': train_iter, 'val': val_iter, 'test': test_iter}, vocab
 
 
 def get_iterator(args, vocab=None):
     iters, vocab = load_data(args, vocab)
-    print("Data Loading Done")
+    print("Data loading done")
 
     return iters, vocab

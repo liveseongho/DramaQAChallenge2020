@@ -33,11 +33,25 @@ class Cli:
         return Munch(args)
 
     def check_dataloader(self, **kwargs):
+        from data.dataset_multichoice import modes
+        from utils import prepare_batch
+        from tqdm import tqdm
+        
         args = self._default_args(**kwargs)
-
         iters, vocab = get_iterator(args)
-        for batch in iters['train']:
-            import ipdb; ipdb.set_trace()  # XXX DEBUG
+
+        train_iter_test = next(iter(iters['train']))
+        for key, value in train_iter_test.items():
+            if isinstance(value, torch.Tensor):
+                print(key, value.shape)
+            else:
+                print(key, value)
+
+        for mode in modes:
+            print('Test loading %s data' % mode)
+            for batch in tqdm(iters[mode]):
+                # import ipdb; ipdb.set_trace()  # XXX DEBUG
+                batch = prepare_batch(args, batch, vocab)
 
     def train(self, **kwargs):
         args = self._default_args(**kwargs)
