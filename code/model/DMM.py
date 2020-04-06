@@ -2,12 +2,12 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-#from torch_geometric.nn import GCNConv
 
 import math
 from . rnn import RNNEncoder, max_along_time
+from . modules import CharMatching, ContextMatching
 
-class MultiChoice(nn.Module):
+class DMM(nn.Module):
     def __init__(self, args, vocab, n_dim, image_dim, layers, dropout, num_choice=5):
         super().__init__()
 
@@ -27,24 +27,24 @@ class MultiChoice(nn.Module):
         self.script_on = "script" in args.stream_type
         self.vbb_on = "visual_bb" in args.stream_type
         self.vmeta_on = "visual_meta" in args.stream_type
-        self.conv_pool = conv1d(n_dim*4+1, n_dim*2)
+        self.conv_pool = Conv1d(n_dim*4+1, n_dim*2)
 
         self.character = nn.Parameter(torch.randn(22, D, device=args.device, dtype=torch.float), requires_grad=True)
         self.norm1 = Norm(D)
 
         if self.script_on:
-            self.lstm_sub = RNNEncoder(321, 150, bidirectional=True, dropout_p=0, n_layers=1, rnn_type="lstm")
-            self.lstm_mature_sub = RNNEncoder(n_dim  * 5, n_dim, bidirectional=True,
+            self.lstm_script = RNNEncoder(321, 150, bidirectional=True, dropout_p=0, n_layers=1, rnn_type="lstm")
+            self.lstm_mature_script = RNNEncoder(n_dim  * 5, n_dim, bidirectional=True,
                                               dropout_p=0, n_layers=1, rnn_type="lstm")
-            self.classifier_sub = nn.Sequential(MLP(n_dim*2, 1, 500, 1), nn.Softmax(dim=1))
-            self.mhattn_sub = CharMatching(4, D, D)
+            self.classifier_script = nn.Sequential(nn.Linear(n_dim*2, 1), nn.Softmax(dim=1))
+            self.mhattn_script = CharMatching(4, D, D)
 
         if self.vmeta_on:            
             self.lstm_vmeta = RNNEncoder(321, 150, bidirectional=True, dropout_p=0, n_layers=1, rnn_type="lstm")
 
             self.lstm_mature_vmeta = RNNEncoder(n_dim  * 5, n_dim, bidirectional=True,
                                                dropout_p=0, n_layers=1, rnn_type="lstm")
-            self.classifier_vmeta = nn.Sequential(MLP(n_dim*2, 1, 500, 1), nn.Softmax(dim=1))
+            self.classifier_vmeta = nn.Sequential(nn.Linear(n_dim*2, 1), nn.Softmax(dim=1))
             self.mhattn_vmeta = CharMatching(4, D, D)
 
         if self.vbb_on:
@@ -57,7 +57,7 @@ class MultiChoice(nn.Module):
             )
             self.lstm_mature_vbb = RNNEncoder(n_dim * 2 * 5, n_dim, bidirectional=True,
                                               dropout_p=0, n_layers=1, rnn_type="lstm")
-            self.classifier_vbb = nn.Sequential(MLP(n_dim*2, 1, 500, 1), nn.Softmax(dim=1))
+            self.classifier_vbb = nn.Sequential(nn.Linear(n_dim*2, 1), nn.Softmax(dim=1))
 
             self.mhattn_vbb = CharMatching(4, D, D)
 
@@ -86,8 +86,6 @@ class MultiChoice(nn.Module):
 
     def len_to_mask(self, lengths, len_max):
         #len_max = lengths.max().item()
-
-
         mask = torch.arange(len_max, device=lengths.device,
                         dtype=lengths.dtype).expand(len(lengths), len_max) >= lengths.unsqueeze(1)
         mask = torch.as_tensor(mask, dtype=torch.uint8, device=lengths.device)
@@ -132,15 +130,12 @@ class MultiChoice(nn.Module):
         ans_len = features['ans_len'].transpose(0, 1)
         e_ans_list = [self.lstm_raw(e_a, ans_len[idx])[0] for idx, e_a in enumerate(e_ans)]
 
-        #e_ans = torch.stack([self.lstm_raw(e_a, ans_len[:,idx]) ], dim=1)
-        
-        
-        #print(self.get_name(que, q_len))
+
         concat_qa = [(self.get_name(que, q_len) + self.get_name(answers.transpose(0,1)[i], ans_len[i])).type(torch.cuda.FloatTensor) for i in range(5)]
         concat_qa_none = [(torch.sum(concat_qa[i], dim=1) == 0).unsqueeze(1).type(torch.cuda.FloatTensor) for i in range(5)]
         concat_qa_none = [torch.cat([concat_qa[i], concat_qa_none[i]], dim=1) for i in range(5)]
-        qa_character = [torch.matmul(concat_qa_none[i], self.character) for i in range(5)]
-        qa_character = [self.norm1(qa_character[i]) for i in range(5)]
+        q_c = [torch.matmul(concat_qa_none[i], self.character) for i in range(5)]
+        q_c = [self.norm1(q_c[i]) for i in range(5)]
 
         if self.script_on:
             e_s = self.embedding(features['filtered_sub'])
@@ -153,22 +148,15 @@ class MultiChoice(nn.Module):
 
             spk_flag = [torch.matmul(spk_onehot, concat_qa[i].unsqueeze(2)) for i in range(5)]
             spk_flag = [(spk_flag[i] > 0).type(torch.cuda.FloatTensor) for i in range(5)]
-            # -------------------------------- #
-            raw_out_sub, _ = self.lstm_sub(e_s, s_len)
-            #raw_out_sub, _ = self.lstm_raw(e_s, s_len)
-            # -------------------------------- #
-
-            if torch.sum(q_len < 2) > 0:
-                print(que)
-
-            s_out = self.stream_processor(self.classifier_sub,self.mhattn_sub, spk_flag, raw_out_sub, s_len, qa_character, e_q, q_len, e_ans_list, ans_len)
+            H_S, _ = self.lstm_script(e_s, s_len)
+            o_s = self.stream_processor(self.classifier_script,self.mhattn_script, spk_flag, H_S, s_len, q_c, e_q, q_len, e_ans_list, ans_len)
         else:
-            s_out = 0
+            o_s = 0
 
         if self.vmeta_on:
             vmeta = features['filtered_visual'].view(B, -1, 3)
-            #print(vmeta.shape)
             vmeta_len = features['filtered_visual_len']*2/3
+
             vp = vmeta[:,:,0]
             vp = vp.unsqueeze(2).repeat(1,1,2).view(B, -1)
             vbe = vmeta[:,:,1:3].contiguous()
@@ -179,12 +167,10 @@ class MultiChoice(nn.Module):
             e_vbe = torch.cat([e_vbe, vp_onehot], dim=2)
             vp_flag = [torch.matmul(vp_onehot, concat_qa[i].unsqueeze(2)) for i in range(5)]
             vp_flag = [(vp_flag[i] > 0).type(torch.cuda.FloatTensor) for i in range(5)]
-            # -------------------------------- #
-            raw_out_vmeta, _ = self.lstm_vmeta(e_vbe, vmeta_len)
-            #raw_out_vmeta, _ = self.lstm_raw(e_vbe, vmeta_len)
-            m_out = self.stream_processor(self.classifier_vmeta, self.mhattn_vmeta, vp_flag, raw_out_vmeta, vmeta_len, qa_character, e_q, q_len, e_ans_list, ans_len)
+            H_M, _ = self.lstm_vmeta(e_vbe, vmeta_len)
+            o_m = self.stream_processor(self.classifier_vmeta, self.mhattn_vmeta, vp_flag, H_M, vmeta_len, q_c, e_q, q_len, e_ans_list, ans_len)
         else:
-            m_out = 0
+            o_m = 0
 
         if self.vbb_on:
             e_vbb = features['filtered_person_full']
@@ -199,14 +185,13 @@ class MultiChoice(nn.Module):
             vp_flag = [torch.matmul(vp_onehot, concat_qa[i].unsqueeze(2)) for i in range(5)]
             vp_flag = [(vp_flag[i] > 0).type(torch.cuda.FloatTensor) for i in range(5)]
             # -------------------------------- #
-            raw_out_vbb, _ = self.lstm_vbb(e_vbb, vbb_len)
-            #raw_out_vbb, _ = self.lstm_raw(e_vbb, vbb_len)
-            b_out = self.stream_processor(self.classifier_vbb, self.mhattn_vbb, vp_flag, raw_out_vbb, vbb_len, qa_character, e_q, q_len, e_ans_list, ans_len)
+            H_B, _ = self.lstm_vbb(e_vbb, vbb_len)
+            o_b = self.stream_processor(self.classifier_vbb, self.mhattn_vbb, vp_flag, H_B, vbb_len, q_c, e_q, q_len, e_ans_list, ans_len)
 
         else:
-            b_out = 0
+            o_b = 0
 
-        out = s_out + m_out + b_out 
+        out = o_s + o_m + o_b
 
         return out.squeeze()
 
@@ -220,7 +205,7 @@ class MultiChoice(nn.Module):
         u_a = [self.cmat(ctx, ctx_l, a_embed[i], a_l[i]) for i in range(5)]
         u_ch = [mhattn(qa_character[i], ctx, ctx_l) for i in range(5)]
 
-        concat_a = [torch.cat([ctx, u_a[i], u_q, ctx_flag[i], u_ch[i]], dim=-1) for i in range(5)]
+        concat_a = [torch.cat([ctx, u_a[i], u_q, u_ch[i], ctx_flag[i]], dim=-1) for i in range(5)]
         maxout = [self.conv_pool(concat_a[i], ctx_l) for i in range(5)]
 
         answers = torch.stack(maxout, dim=1)
@@ -235,36 +220,9 @@ class MultiChoice(nn.Module):
         return x_sum > 0
 
 
-class ContextMatching(nn.Module):
-    def __init__(self, channel_size):
-        super(ContextMatching, self).__init__()
-
-    def similarity(self, s1, l1, s2, l2):
-        s = torch.bmm(s1, s2.transpose(1, 2))
-
-        s_mask = s.data.new(*s.size()).fill_(1).byte()  # [B, T1, T2]
-        # Init similarity mask using lengths
-        for i, (l_1, l_2) in enumerate(zip(l1, l2)):
-            s_mask[i][:l_1, :l_2] = 0
-
-        s_mask = Variable(s_mask)
-        s.data.masked_fill_(s_mask.data.byte(), -float("inf"))
-        return s
-
-    @classmethod
-    def get_u_tile(cls, s, s2):
-        a_weight = F.softmax(s, dim=2)  # [B, t1, t2]
-        a_weight.data.masked_fill_(a_weight.data != a_weight.data, 0)  # remove nan from softmax on -inf
-        u_tile = torch.bmm(a_weight, s2)  # [B, t1, t2] * [B, t2, D] -> [B, t1, D]
-        return u_tile
-
-    def forward(self, s1, l1, s2, l2):
-        s = self.similarity(s1, l1, s2, l2)
-        u_tile = self.get_u_tile(s, s2)
-        return u_tile
 
 
-class conv1d(nn.Module):
+class Conv1d(nn.Module):
     def __init__(self, n_dim, out_dim):
         super().__init__()
         out_dim = int(out_dim/4)
@@ -303,146 +261,3 @@ class Norm(nn.Module):
         return norm
 
 
-
-class MLP(nn.Module):
-    def __init__(self, in_dim, out_dim, hsz, n_layers):
-        super(MLP, self).__init__()
-
-        layers = []
-        prev_dim = in_dim
-        for i in range(n_layers):
-            if i == n_layers - 1:
-                layers.append(nn.Linear(prev_dim, out_dim))
-            else:
-                layers.extend([
-                    nn.Linear(prev_dim, hsz),
-                    nn.ReLU(True),
-                    nn.Dropout(0.5)
-                ])
-                prev_dim = hsz
-
-        self.main = nn.Sequential(*layers)
-
-    def forward(self, x):
-        return self.main(x)
-
-class CharMatching(nn.Module):
-    def __init__(self, heads, hidden, d_model, dropout = 0.1):
-        super(CharMatching,self).__init__()
-
-        self.mhatt = MHAttn(heads, hidden, d_model, dropout)
-        self.ffn = FFN(d_model, d_model)
-
-        self.dropout1 = nn.Dropout(dropout)
-        self.norm1 = Norm(d_model)
-
-        self.dropout2 = nn.Dropout(dropout)
-        self.norm2 = Norm(d_model)
-
-    def forward(self, q, kv, mask_len):
-        att_v = kv
-        mask,_ = self.len_to_mask(mask_len, mask_len.max())
-        for i in range(1):
-            att_v = self.norm1(att_v+self.dropout1(self.mhatt(q, kv, kv, mask))) 
-
-            att_v.masked_fill_(mask.unsqueeze(2).repeat(1,1,att_v.shape[-1]), 0)
-        '''
-        att_v = []
-        for i in range(seq_len):
-            att_v_i = self.norm1(q + self.dropout1(self.mhatt(kv[:,i,:], kv[:,i,:], q)))
-            att_v.append(att_v_i.unsqueeze(1)) # batch, 1, dim
-        att_v = torch.cat(att_v, dim=1) # batch, len, dim
-
-        att_v = self.norm2(att_v + self.dropout2(
-            self.ffn(att_v)
-        ))
-        '''
-        return att_v
-
-    def len_to_mask(self, lengths, len_max):
-        #len_max = lengths.max().item()
-
-
-        mask = torch.arange(len_max, device=lengths.device,
-                        dtype=lengths.dtype).expand(len(lengths), len_max) >= lengths.unsqueeze(1)
-        mask = torch.as_tensor(mask, dtype=torch.uint8, device=lengths.device)
-
-        return mask, len_max
-
-
-class FFN(nn.Module):
-    def __init__(self, hidden_size, ff_size, dropout_r=0.1):
-        super(FFN, self).__init__()
-
-        self.linear1 = nn.Linear(hidden_size, ff_size)
-        self.relu = nn.ReLU(inplace=True)
-        if dropout_r > 0:
-            self.dropout = nn.Dropout(dropout_r)
-        self.linear2 = nn.Linear(ff_size, hidden_size)
-
-    def forward(self, x):
-        x = self.linear1(x)
-        x = self.relu(x)
-
-        if self.dropout_r > 0:
-            x = self.dropout(x)
-
-        return self.linear2(x)
-
-
-class MHAttn(nn.Module):
-    def __init__(self, heads, hidden, d_model, dropout = 0.1):
-        super().__init__()
-
-        self.d_model = d_model
-        self.d_k = int(hidden/heads)
-        self.h = heads
-
-        self.q_linear = nn.Linear(d_model, hidden)
-        self.v_linear = nn.Linear(d_model, hidden)
-        self.k_linear = nn.Linear(d_model, hidden)
-        self.dropout = nn.Dropout(dropout)
-        self.out = nn.Linear(hidden, d_model)
-
-    def forward(self, q, k, v, mask=None):
-        bs = q.size(0)
-
-        # perform linear operation and split into h heads
-        k = self.k_linear(k).view(bs, -1, self.h, self.d_k)
-        q = self.q_linear(q).view(bs, -1, self.h, self.d_k)
-        v = self.v_linear(v).view(bs, -1, self.h, self.d_k)
-
-        # transpose to get dimensions bs * h * sl * d_model
-
-        k = k.transpose(1,2)
-        q = q.transpose(1,2)
-        v = v.transpose(1,2)
-
-        # calculate attention using function we will define next
-        scores = self.attention(q, k, v, self.d_k, mask, self.dropout)
-
-        # concatenate heads and put through final linear layer
-        concat = scores.transpose(1,2).contiguous().view(bs, -1, self.d_k*self.h)
-
-        output = self.out(concat)
-
-        return output
-
-    def attention(self, q, k, v, d_k, mask=None, dropout=None):
-        scores = torch.matmul(q, k.transpose(-2, -1)) /  math.sqrt(d_k)
-
-        if mask is not None:
-            mask = mask.unsqueeze(1).unsqueeze(1).repeat(1,self.h,1,1)
-            scores = scores.masked_fill_(mask, -float("inf"))
-
-        scores = F.softmax(scores, dim=-1)
-
-        scores = scores.transpose(-2, -1).repeat(1,1,1,self.d_k)
-
-        if dropout is not None:
-            scores = dropout(scores)
-
-        #output = torch.matmul(scores, v)
-        output = scores * v
-
-        return output
