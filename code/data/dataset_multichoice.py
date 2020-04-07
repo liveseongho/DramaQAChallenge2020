@@ -343,7 +343,7 @@ class TextData:
                     text_in_visual.add(person_info['behavior'])
                     text_in_visual.add(person_info['emotion'])
 
-        text_in_visual.remove('')
+        #text_in_visual.remove('')
         all_sentences.extend(text_in_visual)
 
         # Find all unique words and count their occurence 
@@ -628,6 +628,7 @@ class MultiModalData(Dataset):
 
     def __getitem__(self, idx):
         text = self.text[idx]
+        qid = text['qid']
         que = text['que']
         ans = text['answers'] 
         subtitle = text['subtitle']
@@ -748,6 +749,7 @@ class MultiModalData(Dataset):
             'filtered_pfu': filtered_pfu,
 
             'q_level_logic': q_level_logic,
+            'qid': qid
         }
         
         # currently not tensor yet
@@ -776,6 +778,7 @@ class MultiModalData(Dataset):
         sub_in_w, sub_in_w_l = self.pad2d(collected['sub_in_word'], self.pad_index, int_dtype)
 
         q_level_logic = collected['q_level_logic'] # No need to convert to torch.Tensor
+        qid = collected['qid'] # No need to convert to torch.Tensor
         
         data = {
             'que': que,
@@ -801,6 +804,7 @@ class MultiModalData(Dataset):
             'filtered_person_full_len': f_pfu_l,
 
             'q_level_logic': q_level_logic,
+            'qid': qid
         }
 
         if correct_idx is not None:

@@ -10,7 +10,7 @@ from . modules import CharMatching, ContextMatching
 class DMM(nn.Module):
     def __init__(self, args, vocab, n_dim, image_dim, layers, dropout, num_choice=5):
         super().__init__()
-
+        print("Model name: Dual Matching Multistream")
         self.vocab = vocab
         V = len(vocab)
         D = n_dim
@@ -27,7 +27,7 @@ class DMM(nn.Module):
         self.script_on = "script" in args.stream_type
         self.vbb_on = "visual_bb" in args.stream_type
         self.vmeta_on = "visual_meta" in args.stream_type
-        self.conv_pool = Conv1d(n_dim*4+1, n_dim*2)
+        self.conv_pool = Conv1d(n_dim*2+1, n_dim*2)
 
         self.character = nn.Parameter(torch.randn(22, D, device=args.device, dtype=torch.float), requires_grad=True)
         self.norm1 = Norm(D)
@@ -205,7 +205,7 @@ class DMM(nn.Module):
         u_a = [self.cmat(ctx, ctx_l, a_embed[i], a_l[i]) for i in range(5)]
         u_ch = [mhattn(qa_character[i], ctx, ctx_l) for i in range(5)]
 
-        concat_a = [torch.cat([ctx, u_a[i], u_q, u_ch[i], ctx_flag[i]], dim=-1) for i in range(5)]
+        concat_a = [torch.cat([ctx, u_ch[i], ctx_flag[i]], dim=-1) for i in range(5)]
         maxout = [self.conv_pool(concat_a[i], ctx_l) for i in range(5)]
 
         answers = torch.stack(maxout, dim=1)
@@ -245,8 +245,6 @@ class Conv1d(nn.Module):
         return max_along_time(out, x_l)
 
 
-
-
 class Norm(nn.Module):
     def __init__(self, d_model, eps = 1e-6):
         super().__init__()
@@ -259,5 +257,4 @@ class Norm(nn.Module):
     def forward(self, x):
         norm = self.alpha * (x - x.mean(dim=-1, keepdim=True)) / (x.std(dim=-1, keepdim=True) + self.eps) + self.bias
         return norm
-
 

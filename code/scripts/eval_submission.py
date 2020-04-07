@@ -24,8 +24,8 @@ def main(args):
     gt_keys = set(gt.keys())
     assert not (gt_keys - hypo_keys), print("Keys missing: {}".format(gt_keys - hypo_keys))
 
-    gt_dicts = divide_with_key(gt, 'videoType')
-    accs = {k: get_acc(hypo, v) for k, v in gt_dicts.items()}
+    gt_dicts = divide_with_key(gt, 'q_level_logic')
+    accs = {str(k): get_acc(hypo, v, k) for k, v in gt_dicts.items()}
     accs['total'] = [sum(v[0] for v in accs.values()), sum(v[1] for v in accs.values())]
     keys = sorted(list(accs.keys()))
 
@@ -53,7 +53,8 @@ def divide_with_key(dt, key):
     return res
 
 
-def get_acc(hypo, gt):
+def get_acc(hypo, gt, k):
+    print(k, len(gt))
     gt_keys = list(gt.keys())
     N = len(gt_keys)
     acc = [float(hypo[k]['correct_idx'] == gt[k]['correct_idx']) for k in gt_keys]

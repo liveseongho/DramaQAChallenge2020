@@ -17,7 +17,7 @@ def get_evaluator(args, model, loss_fn):
     def _inference(evaluator, batch):
         model.eval()
         with torch.no_grad():
-            qids = batch.qid
+            qids = batch["qid"]
             net_inputs, _ = prepare_batch(args, batch, model.vocab)
             y_pred = model(**net_inputs)
             y_pred = y_pred.argmax(dim=-1)  # + 1  # 0~4 -> 1~5
