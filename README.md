@@ -1,7 +1,14 @@
-# Video QA Pipeline
+# DramaQA Starter Code
 
 This repository contains pipelines to conduct video QA with deep learning based models.
 It supports image loading, feature extraction, feature caching, training framework, tensorboard logging and more.
+
+
+## Dataset
+DramaQA dataset is built upon the TV drama `Another Miss Oh` and it contains 16,191 QA pairs from 23,928 various length video clips, with each QA pair belonging to one of four difficulty levels. We provide 217,308 annotated images with rich character-centered visual annotations and coreference resolved scripts. 
+
+- Dataset Overview
+    ![dataset overview](./figures/dramaqa_overview_final.png)
 
 ## Dependency
 
@@ -23,8 +30,8 @@ data/
       AnotherMissOhQA_train_set.json
       AnotherMissOhQA_val_set.json
       AnotherMissOhQA_test_set.json
-      $QA_FILES
-    AnotherMissOh_subtitles.json
+    AnotherMissOh_Visual.json
+    AnotherMissOh_script.json
 ```
 
 ## Install
@@ -96,4 +103,4 @@ See the Troubleshooting page and submit a new issue or contact us if you cannot 
 
 ## Contact Us
 
-To contact us, send an email to jiwanchung@vision.snu.ac.kr
+To contact us, send an email to shchoi@bi.snu.ac.kr
