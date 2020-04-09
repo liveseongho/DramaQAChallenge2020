@@ -10,6 +10,13 @@ DramaQA dataset is built upon the TV drama `Another Miss Oh` and it contains 16,
 - Dataset Overview
     ![dataset overview](./figures/dramaqa_overview_final.png)
 
+## Dual Matching Multistream
+Dual Matching Multistream model effectively learns character-centered representations of video to answer questions about the video.
+
+- Model Overview
+    ![model figure](./figures/model_final.png)
+
+
 ## Dependency
 
 We use python3 (3.5.2), and python2 is not supported.
