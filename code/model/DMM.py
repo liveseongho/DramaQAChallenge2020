@@ -27,7 +27,7 @@ class DMM(nn.Module):
         self.script_on = "script" in args.stream_type
         self.vbb_on = "visual_bb" in args.stream_type
         self.vmeta_on = "visual_meta" in args.stream_type
-        self.conv_pool = Conv1d(n_dim*2+1, n_dim*2)
+        self.conv_pool = Conv1d(n_dim*4+1, n_dim*2)
 
         self.character = nn.Parameter(torch.randn(22, D, device=args.device, dtype=torch.float), requires_grad=True)
         self.norm1 = Norm(D)
@@ -205,7 +205,10 @@ class DMM(nn.Module):
         u_a = [self.cmat(ctx, ctx_l, a_embed[i], a_l[i]) for i in range(5)]
         u_ch = [mhattn(qa_character[i], ctx, ctx_l) for i in range(5)]
 
-        concat_a = [torch.cat([ctx, u_ch[i], ctx_flag[i]], dim=-1) for i in range(5)]
+        concat_a = [torch.cat([ctx, u_a[i], u_q, ctx_flag[i], u_ch[i]], dim=-1) for i in range(5)] 
+        
+        # ctx, u_ch[i], ctx_flag[i],
+        # exp_2 : ctx, u_a[i], u_q, ctx_flag[i], u_ch[i]
         maxout = [self.conv_pool(concat_a[i], ctx_l) for i in range(5)]
 
         answers = torch.stack(maxout, dim=1)

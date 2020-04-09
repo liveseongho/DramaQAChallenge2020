@@ -11,7 +11,7 @@ from config import config, debug_options
 from data.dataset_multichoice import get_iterator
 from utils import wait_for_key, suppress_stdout
 from train import train
-from evaluate import evaluate
+from evaluate import evaluate, qa_similarity
 from interactive import interactive
 from infer import infer
 
@@ -79,6 +79,12 @@ class Cli:
         args = self._default_args(**kwargs)
 
         infer(args)
+
+    # added
+    def qa_similarity(self, **kwargs):
+        args = self._default_args(**kwargs)
+        
+        qa_similarity(args)
 
 
 def resolve_paths(config):

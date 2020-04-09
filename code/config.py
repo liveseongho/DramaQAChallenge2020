@@ -1,6 +1,6 @@
 config = {
     'extractor_batch_size': 32, 
-    'model_name': 'dmm', 
+    'model_name': 'dmm', # 'baseline_mlp', 
     'log_path': 'data/log',
     'tokenizer': 'nonword', # 'nltk' # need to check
     'batch_sizes':  (16, 24, 12),

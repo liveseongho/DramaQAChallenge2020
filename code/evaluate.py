@@ -106,7 +106,7 @@ def evaluate_once(evaluator, iterator):
     evaluator.run(iterator)
     return evaluator.state
 
-def evaluate_by_logic_level(args, model, iterator):
+def evaluate_by_logic_level(args, model, iterator, print_total=False):
     from tqdm import tqdm
 
     vocab = model.vocab
@@ -138,9 +138,8 @@ def evaluate_by_logic_level(args, model, iterator):
     for i in range(1, 5):
         print('Level %d: %.4f' % (i, accuracys[i]))
 
-    # Test
-    # print('Total Accuracy:', cor_que_n.sum().item() / (all_que_n.sum().item() - 1))
-
+    if print_total:
+        print('Total Accuracy:', cor_que_n.sum().item() / (all_que_n.sum().item() - 1))
 
 
 def evaluate(args):
@@ -157,3 +156,31 @@ def evaluate(args):
     log_results_cmd('valid/epoch', state, 0)
     evaluate_by_logic_level(args, model, iterator=iters['val'])
 
+
+def qa_similarity(args):
+    from data.dataset_multichoice import get_iterator
+    from model.rnn import mean_along_time
+    import torch.nn.functional as F
+
+    def model(**net_inputs):
+        q = net_inputs['que']
+        a = net_inputs['answers']
+        ql = net_inputs['que_len']
+        al = net_inputs['ans_len']
+        q_level_logic = net_inputs['q_level_logic']
+        q = F.embedding(q, vocab)
+        a = F.embedding(a, vocab)
+        q = mean_along_time(q,  ql)
+        a = [mean_along_time(a[:, i], al[:, i]) for i in range(5)]
+        sim = torch.stack([F.cosine_similarity(q, a[i], dim=1) for i in range(5)])
+        sim = sim.transpose(0, 1)
+
+        return sim
+
+    iters, vocab = get_iterator(args)
+    iterator = iters['val']
+    model.vocab = vocab
+    model.eval = lambda: None
+    vocab = torch.from_numpy(vocab).to(args.device)
+
+    evaluate_by_logic_level(args, model, iterator, print_total=True)
