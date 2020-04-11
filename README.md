@@ -26,9 +26,25 @@ python packages:
 [fire](https://github.com/google/python-fire) for commandline api
 
 
-## Data Folder Structure
+## Install
 
+```bash
+git clone --recurse-submodules (this repo)
+cd $REPO_NAME/code
+(use python >= 3.5)
+pip install -r requirements.txt
+python -m nltk.downloader 'punkt'
 ```
+
+## Data Folder Structure
+Download DramaQA dataset from [here](https://dramaqa.snu.ac.kr/Download) and place the data folder like following structure. 
+```
+code/
+  cli.py
+  train.py
+  evaluate.py
+  infer.py
+  ...
 data/
   AnotherMissOh/
     AnotherMissOh_images/
@@ -41,17 +57,6 @@ data/
     AnotherMissOh_script.json
 ```
 
-## Install
-
-```bash
-git clone --recurse-submodules (this repo)
-cd $REPO_NAME/code
-(use python >= 3.5)
-pip install -r requirements.txt
-python -m nltk.downloader 'punkt'
-```
-
-Place the data folder at `data`.
 
 ## How to Use
 
