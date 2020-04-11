@@ -8,11 +8,10 @@ import torch
 import numpy as np
 
 from config import config, debug_options
-from data.dataset_multichoice import get_iterator
+from dataloader.dataset_multichoice import get_iterator
 from utils import wait_for_key, suppress_stdout
 from train import train
 from evaluate import evaluate, qa_similarity
-from interactive import interactive
 from infer import infer
 
 class Cli:
@@ -33,7 +32,7 @@ class Cli:
         return Munch(args)
 
     def check_dataloader(self, **kwargs):
-        from data.dataset_multichoice import modes
+        from dataloader.dataset_multichoice import modes
         from utils import prepare_batch
         from tqdm import tqdm
         
@@ -66,14 +65,6 @@ class Cli:
         evaluate(args)
 
         wait_for_key()
-
-    def interactive(self, **kwargs):
-        with suppress_stdout():
-            args = self._default_args(**kwargs)
-
-            ans = interactive(args)
-
-        print(ans)
 
     def infer(self, **kwargs):
         args = self._default_args(**kwargs)

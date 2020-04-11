@@ -8,7 +8,6 @@
 - `train.py`: trainer
 - `evaluate.py`: evaluate accuracy with target
 - `infer.py`: make submission from checkpoint
-- `interactive.py`: interactive inference
 - `logger.py`: tensorboard and commandline logger for scalars
 - `utils.py`: utils
 - `json_to_jsonl.py`: json -> line json
@@ -20,7 +19,7 @@
 - `optimizer`: AdaGrad optimizer
 - `scripts`: standalone scripts
   - `eval_submission.py`: evaluate submission file
-- `data`: dataloader
+- `dataloader`: dataloader
   - `dataset`: dataloader for generation
   - `dataset_multichoice`: dataloader for classification
   - `preprocess_image.py`: image feature extraction

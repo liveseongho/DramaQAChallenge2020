@@ -55,7 +55,7 @@ Place the data folder at `data`.
 
 ## How to Use
 
-### training
+### Training
 
 ```bash
 cd code
@@ -70,7 +70,7 @@ Use `video_type` config option to use `'shot'` or `'scene'` type data.
 For further configurations, take a look at `startup/config.py` and
 [fire](https://github.com/google/python-fire).
 
-### evaluation
+### Evaluation
 
 ```bash
 cd code
@@ -80,7 +80,8 @@ python cli.py evaluate --ckpt_name=$CKPT_NAME
 Substitute CKPT_NAME to your prefered checkpoint file.
 e\.g\. `--ckpt_name=='feature*/loss_1.34'`
 
-### making submissions
+### Making submissions
+Challenge participants should submit their outcome with this command.
 
 ```bash
 python cli.py infer --model_name=$MODEL_NAME --ckpt_name=$CKPT_NAME
@@ -88,13 +89,16 @@ python cli.py infer --model_name=$MODEL_NAME --ckpt_name=$CKPT_NAME
 
 The above command will save the outcome at the prompted location.
 
-### evaluating submissions
+<!--
+### Evaluating submissions
 
 ```bash
 cd code/scripts
 python eval_submission.py -y $SUBMISSION_PATH -g $DATA_PATH
 ```
+-->
 
+<!--
 ### Default Preprocessing Details
 
 - images are resized to 224X224 for preprocessing (resnet input size)
@@ -103,7 +107,7 @@ python eval_submission.py -y $SUBMISSION_PATH -g $DATA_PATH
 - storing image feature cache after feature extraction (for faster dataloading)
 - using nltk.word_tokenize for tokenization
 - all images for a scene questions are concatenated in a temporal order
-
+-->
 ## Troubleshooting
 
 See the Troubleshooting page and submit a new issue or contact us if you cannot find an answer.

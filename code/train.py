@@ -15,7 +15,6 @@ def get_trainer(args, model, loss_fn, optimizer):
     def update_model(trainer, batch):
         model.train()
         optimizer.zero_grad()
-        #args['temp'] = np.maximum(args['temp']*np.exp(-args['ANNEAL_RATE']*trainer.state.iteration),args['temp_min'])
         net_inputs, target = prepare_batch(args, batch, model.vocab)
         y_pred = model(**net_inputs)
         batch_size = y_pred.shape[0]

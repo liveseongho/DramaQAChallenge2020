@@ -4,7 +4,7 @@ import torch, pickle
 from torch import nn
 import torch.nn.functional as F
 
-from data.dataset_multichoice import get_iterator as get_iterator_multichoice
+from dataloader.dataset_multichoice import get_iterator as get_iterator_multichoice
 from model import get_model
 from utils import get_dirname_from_args
 

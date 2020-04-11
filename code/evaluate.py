@@ -10,7 +10,7 @@ from logger import log_results_cmd
 from utils import prepare_batch
 from metric import get_metrics
 
-from data.dataset_multichoice import speaker_name, sos_token, eos_token, pad_token
+from dataloader.dataset_multichoice import speaker_name, sos_token, eos_token, pad_token
 
 
 def indices_to_words(indices, vocab):
