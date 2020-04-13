@@ -205,7 +205,7 @@ class DMM(nn.Module):
         u_a = [self.cmat(ctx, ctx_l, a_embed[i], a_l[i]) for i in range(5)]
         u_ch = [mhattn(qa_character[i], ctx, ctx_l) for i in range(5)]
 
-        concat_a = [torch.cat([ctx, u_a[i], u_q, ctx_flag[i], u_ch[i]], dim=-1) for i in range(5)] 
+        concat_a = [torch.cat([ctx,  u_q,u_a[i], u_ch[i], ctx_flag[i]], dim=-1) for i in range(5)] 
         
         # ctx, u_ch[i], ctx_flag[i],
         # exp_2 : ctx, u_a[i], u_q, ctx_flag[i], u_ch[i]
