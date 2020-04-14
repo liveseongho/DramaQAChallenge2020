@@ -1,5 +1,4 @@
 # DramaQA Starter Code
-
 <!--
 This repository contains pipelines to conduct video QA with deep learning based models.
 It supports image loading, feature extraction, feature caching, training framework, tensorboard logging and more.
@@ -27,9 +26,27 @@ python packages:
 [fire](https://github.com/google/python-fire) for commandline api
 
 
-## Data Folder Structure
+## Install
 
+```bash
+git clone --recurse-submodules (this repo)
+cd $REPO_NAME/code
+(use python >= 3.5)
+pip install -r requirements.txt
+python -m nltk.downloader 'punkt'
 ```
+Place the data folder at `$REPO_NAME/data`.
+
+
+## Data Folder Structure
+Download DramaQA dataset from [here](https://dramaqa.snu.ac.kr/Download) and place the data folder like following structure. 
+```
+code/
+  cli.py
+  train.py
+  evaluate.py
+  infer.py
+  ...
 data/
   AnotherMissOh/
     AnotherMissOh_images/
@@ -42,21 +59,10 @@ data/
     AnotherMissOh_script.json
 ```
 
-## Install
-
-```bash
-git clone --recurse-submodules (this repo)
-cd $REPO_NAME/code
-(use python >= 3.5)
-pip install -r requirements.txt
-python -m nltk.downloader 'punkt'
-```
-
-Place the data folder at `data`.
 
 ## How to Use
 
-### training
+### Training
 
 ```bash
 cd code
@@ -71,7 +77,7 @@ Use `video_type` config option to use `'shot'` or `'scene'` type data.
 For further configurations, take a look at `startup/config.py` and
 [fire](https://github.com/google/python-fire).
 
-### evaluation
+### Evaluation
 
 ```bash
 cd code
@@ -81,24 +87,26 @@ python cli.py evaluate --ckpt_name=$CKPT_NAME
 Substitute CKPT_NAME to your prefered checkpoint file.
 e\.g\. `--ckpt_name=model_name_dmm_ckpt_3/loss_0.4818_epoch_15`
 
-### making submissions
+### Making submissions
+Challenge participants should submit their outcome with this command.
 
 ```bash
 python cli.py infer --split test --ckpt_name=$CKPT_NAME
 ```
 
 The above command will save the outcome at the prompted location. 
-Substitute CKPT_NAME to your prefered checkpoint file.
-e\.g\. `--ckpt_name=model_name_dmm/loss_0.4818_epoch_15`
-If you want to get answers from `val`, change `--split test` to `--split val`.
+To get answers from validation data split, change `--split test` to `--split val`.
 
-### evaluating submissions
+<!--
+### Evaluating submissions
 
 ```bash
 cd code/scripts
 python eval_submission.py -y $SUBMISSION_PATH -g $DATA_PATH
 ```
+-->
 
+<!--
 ### Default Preprocessing Details
 
 - images are resized to 224X224 for preprocessing (resnet input size)
@@ -107,7 +115,7 @@ python eval_submission.py -y $SUBMISSION_PATH -g $DATA_PATH
 - storing image feature cache after feature extraction (for faster dataloading)
 - using nltk.word_tokenize for tokenization
 - all images for a scene questions are concatenated in a temporal order
-
+-->
 ## Troubleshooting
 
 See the Troubleshooting page and submit a new issue or contact us if you cannot find an answer.
