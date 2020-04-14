@@ -1,8 +1,9 @@
 # DramaQA Starter Code
 
+<!--
 This repository contains pipelines to conduct video QA with deep learning based models.
 It supports image loading, feature extraction, feature caching, training framework, tensorboard logging and more.
-
+-->
 
 ## Dataset
 DramaQA dataset is built upon the TV drama `Another Miss Oh` and it contains 16,191 QA pairs from 23,928 various length video clips, with each QA pair belonging to one of four difficulty levels. We provide 217,308 annotated images with rich character-centered visual annotations and coreference resolved scripts. 
@@ -26,25 +27,9 @@ python packages:
 [fire](https://github.com/google/python-fire) for commandline api
 
 
-## Install
-
-```bash
-git clone --recurse-submodules (this repo)
-cd $REPO_NAME/code
-(use python >= 3.5)
-pip install -r requirements.txt
-python -m nltk.downloader 'punkt'
-```
-
 ## Data Folder Structure
-Download DramaQA dataset from [here](https://dramaqa.snu.ac.kr/Download) and place the data folder like following structure. 
+
 ```
-code/
-  cli.py
-  train.py
-  evaluate.py
-  infer.py
-  ...
 data/
   AnotherMissOh/
     AnotherMissOh_images/
@@ -57,10 +42,21 @@ data/
     AnotherMissOh_script.json
 ```
 
+## Install
+
+```bash
+git clone --recurse-submodules (this repo)
+cd $REPO_NAME/code
+(use python >= 3.5)
+pip install -r requirements.txt
+python -m nltk.downloader 'punkt'
+```
+
+Place the data folder at `data`.
 
 ## How to Use
 
-### Training
+### training
 
 ```bash
 cd code
@@ -75,7 +71,7 @@ Use `video_type` config option to use `'shot'` or `'scene'` type data.
 For further configurations, take a look at `startup/config.py` and
 [fire](https://github.com/google/python-fire).
 
-### Evaluation
+### evaluation
 
 ```bash
 cd code
@@ -83,27 +79,26 @@ python cli.py evaluate --ckpt_name=$CKPT_NAME
 ```
 
 Substitute CKPT_NAME to your prefered checkpoint file.
-e\.g\. `--ckpt_name=='feature*/loss_1.34'`
+e\.g\. `--ckpt_name=model_name_dmm_ckpt_3/loss_0.4818_epoch_15`
 
-### Making submissions
-Challenge participants should submit their outcome with this command.
+### making submissions
 
 ```bash
-python cli.py infer --model_name=$MODEL_NAME --ckpt_name=$CKPT_NAME
+python cli.py infer --split test --ckpt_name=$CKPT_NAME
 ```
 
-The above command will save the outcome at the prompted location.
+The above command will save the outcome at the prompted location. 
+Substitute CKPT_NAME to your prefered checkpoint file.
+e\.g\. `--ckpt_name=model_name_dmm/loss_0.4818_epoch_15`
+If you want to get answers from `val`, change `--split test` to `--split val`.
 
-<!--
-### Evaluating submissions
+### evaluating submissions
 
 ```bash
 cd code/scripts
 python eval_submission.py -y $SUBMISSION_PATH -g $DATA_PATH
 ```
--->
 
-<!--
 ### Default Preprocessing Details
 
 - images are resized to 224X224 for preprocessing (resnet input size)
@@ -112,7 +107,7 @@ python eval_submission.py -y $SUBMISSION_PATH -g $DATA_PATH
 - storing image feature cache after feature extraction (for faster dataloading)
 - using nltk.word_tokenize for tokenization
 - all images for a scene questions are concatenated in a temporal order
--->
+
 ## Troubleshooting
 
 See the Troubleshooting page and submit a new issue or contact us if you cannot find an answer.
