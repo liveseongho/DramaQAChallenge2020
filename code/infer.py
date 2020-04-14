@@ -39,6 +39,8 @@ def evaluate_once(evaluator, iterator):
 
 
 def infer(args):
+    split = args.split 
+
     args, model, iters, vocab, ckpt_available = get_model_ckpt(args)
     if ckpt_available:
         print("loaded checkpoint {}".format(args.ckpt_name))
@@ -46,7 +48,7 @@ def infer(args):
 
     evaluator = get_evaluator(args, model, loss_fn)
 
-    answers = evaluate_once(evaluator, iterator=iters['test'])
+    answers = evaluate_once(evaluator, iterator=iters[split])
     keys = sorted(list(answers.keys()))
     answers = [{"correct_idx": answers[key], "qid": key} for key in keys]
     path = str(args.data_path.parent / 'answers.json')

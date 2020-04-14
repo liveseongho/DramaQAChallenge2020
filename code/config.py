@@ -6,7 +6,7 @@ config = {
     'batch_sizes':  (16, 24, 12),
     'lower': True,
     'use_inputs':['que','answers','subtitle','speaker','images','sample_visual','filtered_visual','filtered_sub','filtered_speaker','filtered_image','que_len','ans_len','sub_len','filtered_visual_len','filtered_sub_len','filtered_image_len', 'filtered_person_full', 'filtered_person_full_len', 'q_level_logic'],
-    'stream_type': ['script', 'visual_bb', 'visual_meta'], #
+    'stream_type': ['script',  'visual_bb', 'visual_meta'], #
     'cache_image_vectors': True,
     'image_path': 'data/AnotherMissOh/AnotherMissOh_images',
     'visual_path': 'data/AnotherMissOh/AnotherMissOh_Visual.json',
@@ -32,6 +32,7 @@ config = {
     'max_sub_len': 300,
     'max_image_len': 100,
     'shuffle': (False, False, False),
+    'split':20202
 }
 
 
@@ -41,5 +42,6 @@ debug_options = {
 
 log_keys = [
     'model_name',
+    'split'
     # 'feature_pooling_method', # useless
 ]
