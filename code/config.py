@@ -32,7 +32,7 @@ config = {
     'max_sub_len': 300,
     'max_image_len': 100,
     'shuffle': (False, False, False),
-    'split':20202
+    'ckpt': 3
 }
 
 
@@ -42,6 +42,6 @@ debug_options = {
 
 log_keys = [
     'model_name',
-    'split'
+    'ckpt'
     # 'feature_pooling_method', # useless
 ]
