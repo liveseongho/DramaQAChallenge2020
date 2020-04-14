@@ -69,12 +69,10 @@ cd code
 python cli.py train
 ```
 
-Access the prompted tensorboard port to view basic statistics.
-At the end of every epoch, a checkpoint file will be saved on `/data/ckpt/OPTION_NAMES`
+The above command will preprocess textual and visual input before it starts training process. Access the prompted tensorboard port to view basic statistics.
+At the end of every epoch, a checkpoint file will be saved on `data/ckpt/OPTION_NAMES`
 
-Use `video_type` config option to use `'shot'` or `'scene'` type data.
-
-For further configurations, take a look at `startup/config.py` and
+For further configurations, take a look at `code/config.py` and
 [fire](https://github.com/google/python-fire).
 
 ### Evaluation
