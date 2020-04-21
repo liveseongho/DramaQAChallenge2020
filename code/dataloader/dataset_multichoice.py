@@ -273,6 +273,10 @@ class ImageData:
 
 class TextData:
     def __init__(self, args, vocab=None):
+        self.val_types = ['all', 'ch_only']
+        if args.val_type not in self.val_types:
+            raise ValueError('val_type should be ' + ' or '.join(self.val_types))
+
         self.args = args
 
         self.line_keys = ['que']
@@ -301,7 +305,10 @@ class TextData:
                 self.preprocess_text(vocab)
 
         self.vocab = vocab
+
         self.data = {m: load_pickle(self.pickle_data_path[m]) for m in modes} 
+        if args.val_type == 'ch_only' :
+            self.data['val'] = load_pickle(get_data_path(args, mode='val_ch_only', ext='.pickle'))
     
     # borrowed this implementation from load_glove of tvqa_dataset.py (TVQA),
     # which borrowed from @karpathy's neuraltalk.
@@ -469,6 +476,23 @@ class TextData:
             save_pickle(texts[mode], self.pickle_data_path[mode])
 
         del self.raw_texts
+
+        self.extract_val_ch_only(texts['val'])
+
+    def extract_val_ch_only(self, data):
+        print('Extracting QAs that contains 5 different people in answer')
+
+        new_data = []
+        for qa in tqdm(data):
+            ans = qa['answers']
+            ans = [torch.tensor(ans[i], dtype=int_dtype) for i in range(5)]
+
+            persons = set(idx.item() for i in range(5) for idx in ans[i][ans[i] < n_speakers])
+
+            if len(persons) >= 5:
+                new_data.append(qa)
+
+        save_pickle(new_data, get_data_path(self.args, mode='val_ch_only', ext='.pickle'))
 
     # borrowed this implementation from TVQA (load_glove of tvqa_dataset.py)
     def load_glove(self, glove_path):
@@ -897,8 +921,6 @@ def load_data(args, vocab=None):
         collate_fn=test_dataset.collate_fn
     )
 
-    #val_iter = extract_val_ch_only(args, val_iter)
-
     return {'train': train_iter, 'val': val_iter, 'test': test_iter}, vocab
 
 
@@ -908,18 +930,3 @@ def get_iterator(args, vocab=None):
 
     return iters, vocab
 
-def extract_val_ch_only(args, data):
-    new_data = []
-
-    print('extract_ans_with_5_different_people')
-    for qa in tqdm(data):
-        ans = qa['answers']
-        ans = [torch.tensor(ans[i], dtype=int_dtype) for i in range(5)]
-
-        persons = set(idx.item() for i in range(5) for idx in ans[i][ans[i] < n_speakers])
-
-        if len(persons) >= 5:
-            new_data.append(qa)
-
-    save_pickle(new_data, get_data_path(args, mode='val_ch_only', ext='.pickle'))
-    return new_data

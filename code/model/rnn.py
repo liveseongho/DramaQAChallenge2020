@@ -1,4 +1,4 @@
-__author__ = "Jie Lei"
+#  from https://github.com/jayleicn/TVQA/blob/master/model/rnn.py
 
 #  ref: https://github.com/lichengunc/MAttNet/blob/master/lib/layers/lang_encoder.py#L11
 #  ref: https://github.com/easonnie/flint/blob/master/torch_util.py#L272

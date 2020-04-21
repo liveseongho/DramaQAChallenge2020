@@ -119,7 +119,6 @@ class DMM(nn.Module):
         '''
 
         B = que.shape[0]
-
         # -------------------------------- #
         e_q = self.embedding(que)
         q_len = features['que_len']
@@ -193,10 +192,8 @@ class DMM(nn.Module):
 
         out = o_s + o_m + o_b
 
-        return out.squeeze()
+        return out.view(B, -1)
 
-
-        return o
        
     def stream_processor(self, classifier, mhattn, ctx_flag, ctx, ctx_l,
                          qa_character, q_embed, q_l, a_embed, a_l):
@@ -205,7 +202,7 @@ class DMM(nn.Module):
         u_a = [self.cmat(ctx, ctx_l, a_embed[i], a_l[i]) for i in range(5)]
         u_ch = [mhattn(qa_character[i], ctx, ctx_l) for i in range(5)]
 
-        concat_a = [torch.cat([ctx,  u_q,u_a[i], u_ch[i], ctx_flag[i]], dim=-1) for i in range(5)] 
+        concat_a = [torch.cat([ctx, u_q, u_a[i], u_ch[i], ctx_flag[i]], dim=-1) for i in range(5)] 
         
         # ctx, u_ch[i], ctx_flag[i],
         # exp_2 : ctx, u_a[i], u_q, ctx_flag[i], u_ch[i]

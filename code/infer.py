@@ -48,7 +48,7 @@ def infer(args):
 
     evaluator = get_evaluator(args, model, loss_fn)
 
-    answers = evaluate_once(evaluator, iterator=iters[split])
+    answers = evaluate_once(evaluator, iterator=iters['test'])
     keys = sorted(list(answers.keys()))
     answers = [{"correct_idx": answers[key], "qid": key} for key in keys]
     path = str(args.data_path.parent / 'answers.json')

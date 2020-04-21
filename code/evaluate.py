@@ -151,14 +151,14 @@ def evaluate(args):
 
     metrics = get_metrics(args, vocab)
     evaluator = get_evaluator(args, model, loss_fn, metrics)
-
+    
     state = evaluate_once(evaluator, iterator=iters['val'])
     log_results_cmd('valid/epoch', state, 0)
     evaluate_by_logic_level(args, model, iterator=iters['val'])
 
 
 def qa_similarity(args):
-    from data.dataset_multichoice import get_iterator
+    from dataloader.dataset_multichoice import get_iterator
     from model.rnn import mean_along_time
     import torch.nn.functional as F
 

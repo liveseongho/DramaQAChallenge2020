@@ -13,7 +13,8 @@ config = {
     'data_path': 'data/AnotherMissOh/AnotherMissOh_QA/AnotherMissOhQA_set_script.jsonl',
     'subtitle_path': 'data/AnotherMissOh/AnotherMissOh_script.json',
     'glove_path': "data/glove.6B.300d.txt", # "data/glove.6B.50d.txt"
-    'vocab_path': "data/vocab.pickle",
+    'vocab_path': "data/AnotherMissOh/vocab.pickle",
+    'val_type': 'all', #  'all' | 'ch_only'
     'max_epochs': 20,
     'num_workers': 40, 
     'image_dim': 512,  # hardcoded for ResNet18
@@ -31,8 +32,7 @@ config = {
     'max_sentence_len': 30,
     'max_sub_len': 300,
     'max_image_len': 100,
-    'shuffle': (False, False, False),
-    'ckpt': 3
+    'shuffle': (False, False, False)
 }
 
 
@@ -42,6 +42,5 @@ debug_options = {
 
 log_keys = [
     'model_name',
-    'ckpt'
     # 'feature_pooling_method', # useless
 ]
