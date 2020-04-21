@@ -89,11 +89,11 @@ e\.g\. `--ckpt_name=model_name_dmm_ckpt_3/loss_0.4818_epoch_15`
 Challenge participants should submit their outcome with this command.
 
 ```bash
-python cli.py infer --split test --ckpt_name=$CKPT_NAME
+python cli.py infer --ckpt_name=$CKPT_NAME
 ```
 
 The above command will save the outcome at the prompted location. 
-To get answers from validation data split, change `--split test` to `--split val`.
+<!-- To get answers from validation data split, change `--split test` to `--split val`. -->
 
 <!--
 ### Evaluating submissions
